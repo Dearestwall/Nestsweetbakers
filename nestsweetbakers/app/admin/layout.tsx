@@ -1,9 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
+import { collection, query, where, onSnapshot, getDocs } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import Image from 'next/image';
 import { 
   LayoutDashboard, 
   ShoppingBag, 
@@ -21,7 +24,10 @@ import {
   FileText,
   Gift,
   Bell,
-  ChevronRight
+  ChevronRight,
+  TrendingUp,
+  DollarSign,
+  Activity
 } from 'lucide-react';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -30,6 +36,84 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
+  const [stats, setStats] = useState({
+    pendingOrders: 0,
+    pendingRequests: 0,
+    pendingReviews: 0,
+    todayOrders: 0,
+    todayRevenue: 0,
+  });
+
+  // Real-time stats
+  useEffect(() => {
+    if (!user || !isAdmin) return;
+
+    const unsubscribers: (() => void)[] = [];
+
+    // Pending Orders
+    const ordersQuery = query(
+      collection(db, 'orders'),
+      where('status', 'in', ['pending', 'processing'])
+    );
+    const unsubOrders = onSnapshot(ordersQuery, (snapshot) => {
+      setStats(prev => ({ ...prev, pendingOrders: snapshot.size }));
+    });
+    unsubscribers.push(unsubOrders);
+
+    // Pending Custom Requests
+    const requestsQuery = query(
+      collection(db, 'customRequests'),
+      where('status', '==', 'pending')
+    );
+    const unsubRequests = onSnapshot(requestsQuery, (snapshot) => {
+      setStats(prev => ({ ...prev, pendingRequests: snapshot.size }));
+    });
+    unsubscribers.push(unsubRequests);
+
+    // Pending Reviews
+    const reviewsQuery = query(
+      collection(db, 'reviews'),
+      where('approved', '==', false)
+    );
+    const unsubReviews = onSnapshot(reviewsQuery, (snapshot) => {
+      setStats(prev => ({ ...prev, pendingReviews: snapshot.size }));
+    });
+    unsubscribers.push(unsubReviews);
+
+    // Today's stats
+    const fetchTodayStats = async () => {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const todayOrdersQuery = query(
+        collection(db, 'orders'),
+        where('createdAt', '>=', today)
+      );
+      
+      const ordersSnap = await getDocs(todayOrdersQuery);
+      let revenue = 0;
+      ordersSnap.forEach(doc => {
+        const data = doc.data();
+        if (data.status === 'completed') {
+          revenue += data.totalPrice || 0;
+        }
+      });
+
+      setStats(prev => ({
+        ...prev,
+        todayOrders: ordersSnap.size,
+        todayRevenue: revenue
+      }));
+    };
+
+    fetchTodayStats();
+    const interval = setInterval(fetchTodayStats, 60000); // Update every minute
+
+    return () => {
+      unsubscribers.forEach(unsub => unsub());
+      clearInterval(interval);
+    };
+  }, [user, isAdmin]);
 
   useEffect(() => {
     if (user && !isAdmin) {
@@ -55,9 +139,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const navItems = [
     { icon: LayoutDashboard, label: 'Dashboard', href: '/admin', badge: null },
     { icon: Package, label: 'Products', href: '/admin/products', badge: null },
-    { icon: ShoppingBag, label: 'Orders', href: '/admin/orders', badge: '5' },
-    { icon: Gift, label: 'Custom Requests', href: '/admin/custom-requests', badge: '3' },
-    { icon: Star, label: 'Reviews', href: '/admin/reviews', badge: null },
+    { icon: ShoppingBag, label: 'Orders', href: '/admin/orders', badge: stats.pendingOrders > 0 ? stats.pendingOrders.toString() : null },
+    { icon: Gift, label: 'Custom Requests', href: '/admin/custom-requests', badge: stats.pendingRequests > 0 ? stats.pendingRequests.toString() : null },
+    { icon: Star, label: 'Reviews', href: '/admin/reviews', badge: stats.pendingReviews > 0 ? stats.pendingReviews.toString() : null },
     { icon: ImageIcon, label: 'Hero Slides', href: '/admin/hero-slides', badge: null },
     { icon: FileText, label: 'Testimonials', href: '/admin/testimonials', badge: null },
     ...(isSuperAdmin ? [{ icon: Shield, label: 'User Management', href: '/admin/users', badge: null }] : []),
@@ -140,8 +224,27 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 <X size={24} />
               </button>
             </div>
+            
+            {/* Quick Stats in Sidebar */}
+            <div className="grid grid-cols-2 gap-2 mt-4">
+              <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2">
+                <div className="flex items-center gap-2 mb-1">
+                  <TrendingUp size={14} />
+                  <span className="text-xs font-semibold">Today</span>
+                </div>
+                <p className="text-lg font-bold">{stats.todayOrders}</p>
+              </div>
+              <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2">
+                <div className="flex items-center gap-2 mb-1">
+                  <DollarSign size={14} />
+                  <span className="text-xs font-semibold">Revenue</span>
+                </div>
+                <p className="text-lg font-bold">₹{stats.todayRevenue}</p>
+              </div>
+            </div>
+
             {isSuperAdmin && (
-              <div className="bg-yellow-400 text-yellow-900 px-3 py-1.5 rounded-full text-xs font-bold inline-flex items-center gap-2">
+              <div className="bg-yellow-400 text-yellow-900 px-3 py-1.5 rounded-full text-xs font-bold inline-flex items-center gap-2 mt-3">
                 <Shield size={14} />
                 Super Admin Access
               </div>
@@ -205,11 +308,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <div className="flex items-center gap-3 mb-3 px-4 py-3 bg-white rounded-xl shadow-sm">
             <div className="w-12 h-12 bg-gradient-to-br from-pink-600 to-purple-600 rounded-full flex items-center justify-center text-white font-bold text-lg relative overflow-hidden flex-shrink-0">
               {user.photoURL ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img 
+                <Image 
                   src={user.photoURL} 
                   alt={user.displayName || 'Admin'} 
-                  className="w-full h-full rounded-full object-cover"
+                  fill
+                  className="object-cover"
+                  sizes="48px"
                 />
               ) : (
                 <span>{user.displayName?.charAt(0) || 'A'}</span>
@@ -251,10 +355,16 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 {navItems.find(item => item.href === pathname)?.label || 'Admin Panel'}
               </span>
             </div>
-            <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors relative">
-              <Bell size={24} className="text-gray-600" />
-              <span className="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
-            </button>
+            <div className="flex items-center gap-2">
+              {(stats.pendingOrders + stats.pendingRequests + stats.pendingReviews) > 0 && (
+                <div className="relative">
+                  <Activity size={24} className="text-pink-600" />
+                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-xs rounded-full flex items-center justify-center animate-pulse">
+                    {stats.pendingOrders + stats.pendingRequests + stats.pendingReviews}
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
