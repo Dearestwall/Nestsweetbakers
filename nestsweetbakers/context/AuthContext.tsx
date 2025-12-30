@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { 
   GoogleAuthProvider, 
   signInWithPopup,
@@ -39,12 +39,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Mark component as mounted
   useEffect(() => {
     setMounted(true);
+    return () => setMounted(false);
   }, []);
 
-  // Check if user is admin or superAdmin
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const checkAdminStatus = async (uid: string) => {
-    if (!mounted) return; // ✅ Don't update state if not mounted
+  // Check if user is admin or superAdmin - useCallback to prevent recreating function
+  const checkAdminStatus = useCallback(async (uid: string) => {
+    if (!mounted) return;
 
     try {
       const [adminDoc, superAdminDoc] = await Promise.all([
@@ -52,7 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         getDoc(doc(db, 'superAdmins', uid))
       ]);
 
-      if (mounted) { // ✅ Check again before setState
+      if (mounted) {
         setIsSuperAdmin(superAdminDoc.exists());
         setIsAdmin(adminDoc.exists() || superAdminDoc.exists());
       }
@@ -63,10 +63,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsSuperAdmin(false);
       }
     }
-  };
+  }, [mounted]);
 
   // Create/update user profile in Firestore
-  const ensureUserProfile = async (currentUser: User) => {
+  const ensureUserProfile = useCallback(async (currentUser: User) => {
     try {
       const userRef = doc(db, 'users', currentUser.uid);
       const userDoc = await getDoc(userRef);
@@ -89,49 +89,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.error('Error creating user profile:', error);
     }
-  };
+  }, []);
 
+  // Auth state listener
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || !mounted) return;
 
     const unsubscribe = onAuthStateChanged(
       auth, 
       async (currentUser) => {
-        if (!mounted) return; // ✅ Don't update if not mounted
-
         setUser(currentUser);
 
         if (currentUser) {
-          // Run async operations without blocking
-          Promise.all([
-            checkAdminStatus(currentUser.uid),
-            ensureUserProfile(currentUser)
-          ]).catch(err => {
+          // Run async operations
+          try {
+            await Promise.all([
+              checkAdminStatus(currentUser.uid),
+              ensureUserProfile(currentUser)
+            ]);
+          } catch (err) {
             console.error('Error in auth setup:', err);
-          });
-        } else {
-          if (mounted) {
-            setIsAdmin(false);
-            setIsSuperAdmin(false);
           }
+        } else {
+          setIsAdmin(false);
+          setIsSuperAdmin(false);
         }
 
-        if (mounted) {
-          setLoading(false);
-        }
+        setLoading(false);
       }, 
       (error) => {
         console.error('Auth state change error:', error);
-        if (mounted) {
-          setLoading(false);
-        }
+        setLoading(false);
       }
     );
 
-    return () => {
-      unsubscribe();
-    };
-  }, [checkAdminStatus, mounted]); // ✅ Depend on mounted state
+    return () => unsubscribe();
+  }, [mounted, checkAdminStatus, ensureUserProfile]);
 
   const signIn = async () => {
     if (typeof window === 'undefined') return;
@@ -144,7 +137,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await signInWithPopup(auth, provider);
     } catch (error: any) {
       console.error('Sign in error:', error);
-      throw new Error(error.message || 'Failed to sign in');
+      throw error; // Throw original error for better error codes
     }
   };
 
@@ -155,7 +148,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await signInWithEmailAndPassword(auth, email, password);
     } catch (error: any) {
       console.error('Email sign in error:', error);
-      throw new Error(error.message || 'Failed to sign in');
+      throw error; // Throw original error
     }
   };
 
@@ -167,10 +160,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       if (userCredential.user) {
         await updateProfile(userCredential.user, { displayName: name });
+        // Reload to get updated profile
+        await userCredential.user.reload();
       }
     } catch (error: any) {
       console.error('Sign up error:', error);
-      throw new Error(error.message || 'Failed to sign up');
+      throw error; // Throw original error
     }
   };
 
@@ -181,7 +176,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await sendPasswordResetEmail(auth, email);
     } catch (error: any) {
       console.error('Password reset error:', error);
-      throw new Error(error.message || 'Failed to send reset email');
+      throw error; // Throw original error
     }
   };
 
@@ -190,16 +185,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     
     try {
       await firebaseSignOut(auth);
-      if (mounted) {
-        setIsAdmin(false);
-        setIsSuperAdmin(false);
-      }
+      setIsAdmin(false);
+      setIsSuperAdmin(false);
     } catch (error) {
       console.error('Sign out error:', error);
+      throw error;
     }
   };
 
-  // Don't render children until mounted to prevent hydration issues
+  // Don't render children until mounted
   if (!mounted) {
     return null;
   }
