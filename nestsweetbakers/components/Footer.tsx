@@ -3,8 +3,9 @@
 import Link from 'next/link';
 import { Instagram, Facebook, Phone, Mail, MapPin, Twitter, Youtube } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { useToast } from '@/context/ToastContext';
 
 interface FooterContent {
   companyName: string;
@@ -18,11 +19,6 @@ interface FooterContent {
     twitter?: string;
     youtube?: string;
   };
-  links: {
-    company: Array<{ label: string; href: string }>;
-    support: Array<{ label: string; href: string }>;
-    legal: Array<{ label: string; href: string }>;
-  };
   newsletter: {
     enabled: boolean;
     title: string;
@@ -34,34 +30,14 @@ export default function Footer() {
   const [content, setContent] = useState<FooterContent>({
     companyName: 'NestSweets',
     tagline: 'Crafting sweet memories with every bite. Fresh, custom-made cakes for all your celebrations.',
-    phone: '+91 1234567890',
-    email: 'hello@nestsweetbakers.com',
+    phone: '+91 98765 43210',
+    email: 'hello@nestsweets.com',
     address: 'Narnaund, Haryana, India',
     social: {
-      instagram: 'https://instagram.com/nestsweetbakers',
-      facebook: 'https://facebook.com/nestsweetbakers',
-      twitter: 'https://twitter.com/nestsweetbakers',
-      youtube: 'https://youtube.com/@nestsweetbakers',
-    },
-    links: {
-      company: [
-        { label: 'About Us', href: '/about' },
-        { label: 'Our Cakes', href: '/cakes' },
-        { label: 'Custom Orders', href: '/custom-cakes' },
-        { label: 'Services', href: '/services' },
-      ],
-      support: [
-        { label: 'Contact Us', href: '/contact' },
-        { label: 'FAQs', href: '/faq' },
-        { label: 'Delivery Info', href: '/delivery' },
-        { label: 'Track Order', href: '/orders' },
-      ],
-      legal: [
-        { label: 'Privacy Policy', href: '/privacy' },
-        { label: 'Terms of Service', href: '/terms' },
-        { label: 'Refund Policy', href: '/refund' },
-        { label: 'Cookie Policy', href: '/cookies' },
-      ],
+      instagram: 'https://instagram.com/nestsweets',
+      facebook: 'https://facebook.com/nestsweets',
+      twitter: 'https://twitter.com/nestsweets',
+      youtube: 'https://youtube.com/@nestsweets',
     },
     newsletter: {
       enabled: true,
@@ -72,6 +48,7 @@ export default function Footer() {
 
   const [email, setEmail] = useState('');
   const [subscribing, setSubscribing] = useState(false);
+  const { showSuccess, showError } = useToast();
 
   useEffect(() => {
     async function fetchFooterContent() {
@@ -94,17 +71,41 @@ export default function Footer() {
     setSubscribing(true);
     
     try {
-      // Add newsletter subscription logic here
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Simulated delay
-      alert('Thank you for subscribing!');
+      await addDoc(collection(db, 'newsletter'), {
+        email,
+        subscribedAt: serverTimestamp(),
+        status: 'active'
+      });
+      showSuccess('🎉 Thank you for subscribing! Check your inbox for exclusive offers.');
       setEmail('');
     } catch (error) {
       console.error('Error subscribing:', error);
-      alert('Failed to subscribe. Please try again.');
+      showError('❌ Failed to subscribe. Please try again.');
     } finally {
       setSubscribing(false);
     }
   };
+
+  const companyLinks = [
+    { label: 'About Us', href: '/about' },
+    { label: 'Our Cakes', href: '/cakes' },
+    { label: 'Custom Orders', href: '/custom-cakes' },
+    { label: 'Services', href: '/services' },
+  ];
+
+  const supportLinks = [
+    { label: 'Contact Us', href: '/contact' },
+    { label: 'FAQs', href: '/faq' },
+    { label: 'Track Order', href: '/orders' },
+    { label: 'Delivery Info', href: '/delivery' },
+  ];
+
+  const legalLinks = [
+    { label: 'Privacy Policy', href: '/privacy' },
+    { label: 'Terms of Service', href: '/terms' },
+    { label: 'Refund Policy', href: '/refund' },
+    { label: 'Cookie Policy', href: '/cookies' },
+  ];
 
   return (
     <footer className="bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white relative overflow-hidden">
@@ -115,41 +116,12 @@ export default function Footer() {
       </div>
 
       <div className="container mx-auto px-4 py-12 md:py-16 relative z-10">
-        {/* Newsletter Section */}
-        {content.newsletter.enabled && (
-          <div className="bg-gradient-to-r from-pink-600 to-purple-600 rounded-2xl p-8 md:p-12 mb-12 shadow-2xl">
-            <div className="max-w-4xl mx-auto text-center">
-              <h3 className="text-3xl md:text-4xl font-bold mb-3">
-                {content.newsletter.title}
-              </h3>
-              <p className="text-pink-100 mb-6 text-lg">
-                {content.newsletter.subtitle}
-              </p>
-              <form onSubmit={handleNewsletterSubmit} className="flex flex-col sm:flex-row gap-4 max-w-xl mx-auto">
-                <input
-                  type="email"
-                  placeholder="Enter your email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="flex-1 px-6 py-4 rounded-full text-gray-900 focus:outline-none focus:ring-4 focus:ring-white/50"
-                  required
-                />
-                <button
-                  type="submit"
-                  disabled={subscribing}
-                  className="bg-white text-pink-600 px-8 py-4 rounded-full font-bold hover:bg-yellow-300 hover:text-gray-900 transition-all shadow-lg hover:shadow-xl transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {subscribing ? 'Subscribing...' : 'Subscribe'}
-                </button>
-              </form>
-            </div>
-          </div>
-        )}
+      
 
         {/* Main Footer Content */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-8 md:gap-12 mb-12">
-          {/* About Section */}
-          <div className="lg:col-span-2">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-8 mb-12">
+          {/* About Section - Takes more space */}
+          <div className="lg:col-span-4">
             <Link href="/" className="flex items-center space-x-2 mb-4 group">
               <span className="text-4xl group-hover:scale-110 transition-transform">🍰</span>
               <span className="text-2xl font-bold text-pink-400 group-hover:text-pink-300 transition-colors">
@@ -159,14 +131,14 @@ export default function Footer() {
             <p className="text-gray-400 mb-6 leading-relaxed">
               {content.tagline}
             </p>
-            <div className="flex space-x-3">
+            <div className="flex flex-wrap gap-3">
               {content.social.instagram && (
                 <a
                   href={content.social.instagram}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="bg-pink-600 p-3 rounded-full hover:bg-pink-700 transition-all transform hover:scale-110 shadow-lg hover:shadow-pink-500/50"
-                  aria-label="Instagram"
+                  aria-label="Follow us on Instagram"
                 >
                   <Instagram size={20} />
                 </a>
@@ -177,7 +149,7 @@ export default function Footer() {
                   target="_blank"
                   rel="noopener noreferrer"
                   className="bg-blue-600 p-3 rounded-full hover:bg-blue-700 transition-all transform hover:scale-110 shadow-lg hover:shadow-blue-500/50"
-                  aria-label="Facebook"
+                  aria-label="Follow us on Facebook"
                 >
                   <Facebook size={20} />
                 </a>
@@ -188,7 +160,7 @@ export default function Footer() {
                   target="_blank"
                   rel="noopener noreferrer"
                   className="bg-sky-600 p-3 rounded-full hover:bg-sky-700 transition-all transform hover:scale-110 shadow-lg hover:shadow-sky-500/50"
-                  aria-label="Twitter"
+                  aria-label="Follow us on Twitter"
                 >
                   <Twitter size={20} />
                 </a>
@@ -199,7 +171,7 @@ export default function Footer() {
                   target="_blank"
                   rel="noopener noreferrer"
                   className="bg-red-600 p-3 rounded-full hover:bg-red-700 transition-all transform hover:scale-110 shadow-lg hover:shadow-red-500/50"
-                  aria-label="YouTube"
+                  aria-label="Subscribe on YouTube"
                 >
                   <Youtube size={20} />
                 </a>
@@ -207,74 +179,141 @@ export default function Footer() {
             </div>
           </div>
 
-          {/* Company Links */}
-          <div>
-            <h4 className="text-lg font-bold mb-4 text-pink-400">Company</h4>
-            <ul className="space-y-3">
-              {content.links.company.map((link, index) => (
-                <li key={index}>
-                  <Link
-                    href={link.href}
-                    className="text-gray-400 hover:text-pink-400 transition-colors flex items-center group"
-                  >
-                    <span className="w-0 group-hover:w-2 h-0.5 bg-pink-400 mr-0 group-hover:mr-2 transition-all"></span>
-                    {link.label}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
+          {/* Links Section - Horizontal on mobile, Vertical on desktop */}
+          <div className="lg:col-span-8">
+            {/* Desktop Layout */}
+            <div className="hidden md:grid md:grid-cols-3 gap-8">
+              {/* Company Links */}
+              <div>
+                <h4 className="text-lg font-bold mb-4 text-pink-400">Company</h4>
+                <ul className="space-y-3">
+                  {companyLinks.map((link, index) => (
+                    <li key={index}>
+                      <Link
+                        href={link.href}
+                        className="text-gray-400 hover:text-pink-400 transition-colors flex items-center group"
+                      >
+                        <span className="w-0 group-hover:w-2 h-0.5 bg-pink-400 mr-0 group-hover:mr-2 transition-all"></span>
+                        {link.label}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
 
-          {/* Support Links */}
-          <div>
-            <h4 className="text-lg font-bold mb-4 text-pink-400">Support</h4>
-            <ul className="space-y-3">
-              {content.links.support.map((link, index) => (
-                <li key={index}>
-                  <Link
-                    href={link.href}
-                    className="text-gray-400 hover:text-pink-400 transition-colors flex items-center group"
-                  >
-                    <span className="w-0 group-hover:w-2 h-0.5 bg-pink-400 mr-0 group-hover:mr-2 transition-all"></span>
-                    {link.label}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
+              {/* Support Links */}
+              <div>
+                <h4 className="text-lg font-bold mb-4 text-pink-400">Support</h4>
+                <ul className="space-y-3">
+                  {supportLinks.map((link, index) => (
+                    <li key={index}>
+                      <Link
+                        href={link.href}
+                        className="text-gray-400 hover:text-pink-400 transition-colors flex items-center group"
+                      >
+                        <span className="w-0 group-hover:w-2 h-0.5 bg-pink-400 mr-0 group-hover:mr-2 transition-all"></span>
+                        {link.label}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
 
-          {/* Contact Info */}
-          <div>
-            <h4 className="text-lg font-bold mb-4 text-pink-400">Contact</h4>
-            <ul className="space-y-4">
-              <li className="flex items-start space-x-3 text-gray-400 group">
-                <Phone size={20} className="text-pink-400 mt-0.5 group-hover:scale-110 transition-transform" />
-                <a href={`tel:${content.phone}`} className="hover:text-pink-400 transition-colors">
-                  {content.phone}
-                </a>
-              </li>
-              <li className="flex items-start space-x-3 text-gray-400 group">
-                <Mail size={20} className="text-pink-400 mt-0.5 group-hover:scale-110 transition-transform" />
-                <a href={`mailto:${content.email}`} className="hover:text-pink-400 transition-colors break-all">
-                  {content.email}
-                </a>
-              </li>
-              <li className="flex items-start space-x-3 text-gray-400 group">
-                <MapPin size={20} className="text-pink-400 mt-0.5 group-hover:scale-110 transition-transform" />
-                <span>{content.address}</span>
-              </li>
-            </ul>
+              {/* Contact Info */}
+              <div>
+                <h4 className="text-lg font-bold mb-4 text-pink-400">Contact</h4>
+                <ul className="space-y-4">
+                  <li className="flex items-start space-x-3 text-gray-400 group">
+                    <Phone size={20} className="text-pink-400 mt-0.5 group-hover:scale-110 transition-transform flex-shrink-0" />
+                    <a href={`tel:${content.phone}`} className="hover:text-pink-400 transition-colors">
+                      {content.phone}
+                    </a>
+                  </li>
+                  <li className="flex items-start space-x-3 text-gray-400 group">
+                    <Mail size={20} className="text-pink-400 mt-0.5 group-hover:scale-110 transition-transform flex-shrink-0" />
+                    <a href={`mailto:${content.email}`} className="hover:text-pink-400 transition-colors break-all">
+                      {content.email}
+                    </a>
+                  </li>
+                  <li className="flex items-start space-x-3 text-gray-400 group">
+                    <MapPin size={20} className="text-pink-400 mt-0.5 group-hover:scale-110 transition-transform flex-shrink-0" />
+                    <span>{content.address}</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            {/* Mobile Layout - Horizontal Tables */}
+            <div className="md:hidden space-y-6">
+              {/* Company & Support in 2 columns */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <h4 className="text-base font-bold mb-3 text-pink-400">Company</h4>
+                  <ul className="space-y-2">
+                    {companyLinks.map((link, index) => (
+                      <li key={index}>
+                        <Link
+                          href={link.href}
+                          className="text-gray-400 hover:text-pink-400 transition-colors text-sm"
+                        >
+                          {link.label}
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div>
+                  <h4 className="text-base font-bold mb-3 text-pink-400">Support</h4>
+                  <ul className="space-y-2">
+                    {supportLinks.map((link, index) => (
+                      <li key={index}>
+                        <Link
+                          href={link.href}
+                          className="text-gray-400 hover:text-pink-400 transition-colors text-sm"
+                        >
+                          {link.label}
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+
+              {/* Contact Info */}
+              <div>
+                <h4 className="text-base font-bold mb-3 text-pink-400">Contact</h4>
+                <ul className="space-y-3">
+                  <li className="flex items-center space-x-3 text-gray-400">
+                    <Phone size={18} className="text-pink-400 flex-shrink-0" />
+                    <a href={`tel:${content.phone}`} className="hover:text-pink-400 transition-colors text-sm">
+                      {content.phone}
+                    </a>
+                  </li>
+                  <li className="flex items-center space-x-3 text-gray-400">
+                    <Mail size={18} className="text-pink-400 flex-shrink-0" />
+                    <a href={`mailto:${content.email}`} className="hover:text-pink-400 transition-colors text-sm break-all">
+                      {content.email}
+                    </a>
+                  </li>
+                  <li className="flex items-start space-x-3 text-gray-400">
+                    <MapPin size={18} className="text-pink-400 mt-0.5 flex-shrink-0" />
+                    <span className="text-sm">{content.address}</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Legal Links */}
+        {/* Legal Links - Horizontal on all screens */}
         <div className="border-t border-gray-700 pt-8 mb-8">
-          <div className="flex flex-wrap justify-center gap-6">
-            {content.links.legal.map((link, index) => (
+          <div className="flex flex-wrap justify-center gap-4 md:gap-6">
+            {legalLinks.map((link, index) => (
               <Link
                 key={index}
                 href={link.href}
-                className="text-gray-400 hover:text-pink-400 transition-colors text-sm"
+                className="text-gray-400 hover:text-pink-400 transition-colors text-xs md:text-sm"
               >
                 {link.label}
               </Link>
@@ -284,10 +323,10 @@ export default function Footer() {
 
         {/* Bottom Bar */}
         <div className="border-t border-gray-700 pt-8 text-center">
-          <p className="text-gray-400 mb-2">
+          <p className="text-gray-400 mb-2 text-sm md:text-base">
             © {new Date().getFullYear()} {content.companyName}. All rights reserved.
           </p>
-          <p className="text-gray-500">
+          <p className="text-gray-500 text-sm mb-4">
             Made with <span className="text-pink-500 animate-pulse">❤️</span> by{' '}
             <a
               href="https://instagram.com/thrillyverse"
@@ -295,10 +334,10 @@ export default function Footer() {
               rel="noopener noreferrer"
               className="text-pink-400 hover:text-pink-300 font-semibold transition-colors"
             >
-              @thrillyverse
+              Thrillyverse
             </a>
           </p>
-          <div className="mt-4 flex justify-center items-center gap-2 text-gray-500 text-sm">
+          <div className="flex flex-wrap justify-center items-center gap-2 text-gray-500 text-xs md:text-sm">
             <span>🔒 Secure Payments</span>
             <span>•</span>
             <span>🚚 Fast Delivery</span>
