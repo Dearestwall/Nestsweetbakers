@@ -1,181 +1,162 @@
 'use client';
 
 import { useState } from 'react';
-import { useForm } from 'react-hook-form';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { collection, addDoc } from 'firebase/firestore';
-import { db, storage } from '@/lib/firebase';
-import WhatsAppButton from './WhatsAppButton';
+import { addDoc, collection } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
-interface CustomCakeFormData {
-  customerName: string;
-  customerPhone: string;
-  occasion: string;
-  servings: string;
-  flavor: string;
-  designDescription: string;
+type CustomCakeFormData = {
+  name: string;
+  phone: string;
+  email: string;
+  eventType: string;
+  eventDate: string;
   budget: string;
-  deliveryDate: string;
-  deliveryAddress: string;
+  description: string;
+  referenceImageUrls: string[];
+  createdAt: string;
+  status: 'pending' | 'contacted' | 'completed';
+};
+
+async function uploadToCloudinary(file: File): Promise<string> {
+  const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
+  const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
+
+  if (!cloudName || !uploadPreset) {
+    throw new Error('Cloudinary env missing (cloud name / upload preset).');
+  }
+
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('upload_preset', uploadPreset);
+
+  const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!res.ok) throw new Error('Cloudinary upload failed');
+  const json = (await res.json()) as { secure_url?: string };
+
+  if (!json.secure_url) throw new Error('Cloudinary did not return secure_url');
+  return json.secure_url;
 }
 
-export default function CustomCakeForm() {
-  const [imageFile, setImageFile] = useState<File | null>(null);
+export default function CustomCakeFormFormspree() {
   const [submitting, setSubmitting] = useState(false);
-  const [orderId, setOrderId] = useState<string | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  const [form, setForm] = useState({
+    name: '',
+    phone: '',
+    email: '',
+    eventType: '',
+    eventDate: '',
+    budget: '',
+    description: '',
+  });
 
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-  } = useForm<CustomCakeFormData>();
-
-  const handleImageUpload = async (file: File) => {
-    const storageRef = ref(storage, `custom-cake-requests/${Date.now()}-${file.name}`);
-    await uploadBytes(storageRef, file);
-    return await getDownloadURL(storageRef);
-  };
-
-  const onSubmit = async (data: CustomCakeFormData) => {
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
     setSubmitting(true);
-    
+
     try {
-      let uploadedImageUrl = '';
-      if (imageFile) {
-        uploadedImageUrl = await handleImageUpload(imageFile);
-      }
+      // 1) Upload images to Cloudinary (optional)
+      const referenceImageUrls =
+        files.length > 0 ? await Promise.all(files.map(uploadToCloudinary)) : [];
 
-      // Save to Firebase
-      const docRef = await addDoc(collection(db, 'custom-cake-requests'), {
-        ...data,
-        imageUrl: uploadedImageUrl,
-        status: 'pending',
+      // 2) Save request in Firestore
+      const payload: CustomCakeFormData = {
+        ...form,
+        referenceImageUrls,
         createdAt: new Date().toISOString(),
-      });
+        status: 'pending',
+      };
 
-      setOrderId(docRef.id);
-    } catch (error) {
-      console.error('Error submitting custom cake request:', error);
-      alert('Something went wrong. Please try again.');
+      await addDoc(collection(db, 'customRequests'), payload);
+
+      alert('Request submitted!');
+      setForm({
+        name: '',
+        phone: '',
+        email: '',
+        eventType: '',
+        eventDate: '',
+        budget: '',
+        description: '',
+      });
+      setFiles([]);
+    } catch (err) {
+      console.error(err);
+      alert(err instanceof Error ? err.message : 'Failed to submit request');
     } finally {
       setSubmitting(false);
     }
-  };
-
-  if (orderId) {
-    return (
-      <div className="text-center py-8">
-        <h2 className="text-2xl font-bold text-green-600 mb-4">Request Submitted!</h2>
-        <p className="text-gray-600 mb-4">
-          Your custom cake request (#{orderId}) has been received. We&apos;ll contact you within 2 hours.
-        </p>
-        <WhatsAppButton
-          cake={null}
-          orderData={{ orderId, type: 'custom-cake' }}
-          isCustom={true}
-        />
-      </div>
-    );
   }
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Your Name *</label>
-        <input
-          {...register('customerName', { required: true })}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-        />
-        {errors.customerName && <span className="text-red-500 text-sm">Required</span>}
-      </div>
+    <form onSubmit={onSubmit} className="space-y-4">
+      <input
+        className="w-full border p-3 rounded-lg"
+        placeholder="Name"
+        value={form.name}
+        onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+        required
+      />
+      <input
+        className="w-full border p-3 rounded-lg"
+        placeholder="Phone"
+        value={form.phone}
+        onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))}
+        required
+      />
+      <input
+        className="w-full border p-3 rounded-lg"
+        placeholder="Email"
+        type="email"
+        value={form.email}
+        onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
+        required
+      />
+      <input
+        className="w-full border p-3 rounded-lg"
+        placeholder="Event Type (Birthday/Wedding...)"
+        value={form.eventType}
+        onChange={(e) => setForm((p) => ({ ...p, eventType: e.target.value }))}
+        required
+      />
+      <input
+        className="w-full border p-3 rounded-lg"
+        type="date"
+        value={form.eventDate}
+        onChange={(e) => setForm((p) => ({ ...p, eventDate: e.target.value }))}
+        required
+      />
+      <input
+        className="w-full border p-3 rounded-lg"
+        placeholder="Budget (e.g. ₹1500-₹2500)"
+        value={form.budget}
+        onChange={(e) => setForm((p) => ({ ...p, budget: e.target.value }))}
+        required
+      />
+      <textarea
+        className="w-full border p-3 rounded-lg"
+        placeholder="Describe your cake..."
+        rows={4}
+        value={form.description}
+        onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
+        required
+      />
 
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number *</label>
-        <input
-          {...register('customerPhone', { required: true, pattern: /^[0-9]{10}$/ })}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-        />
-        {errors.customerPhone && <span className="text-red-500 text-sm">Valid 10-digit number required</span>}
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Occasion</label>
-        <select {...register('occasion')} className="w-full px-3 py-2 border border-gray-300 rounded-lg">
-          <option value="Birthday">Birthday</option>
-          <option value="Anniversary">Anniversary</option>
-          <option value="Wedding">Wedding</option>
-          <option value="Baby Shower">Baby Shower</option>
-          <option value="Other">Other</option>
-        </select>
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Number of Servings</label>
-        <select {...register('servings')} className="w-full px-3 py-2 border border-gray-300 rounded-lg">
-          <option value="6-8">6-8 people</option>
-          <option value="10-12">10-12 people</option>
-          <option value="15-20">15-20 people</option>
-          <option value="25+">25+ people</option>
-        </select>
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Preferred Flavor</label>
-        <input
-          {...register('flavor')}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-          placeholder="e.g., Chocolate, Vanilla, Red Velvet"
-        />
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Design Reference Image</label>
-        <input
-          type="file"
-          accept="image/*"
-          onChange={(e) => setImageFile(e.target.files?.[0] || null)}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-        />
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Design Description *</label>
-        <textarea
-          {...register('designDescription', { required: true })}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-          rows={4}
-          placeholder="Describe your dream cake..."
-        />
-        {errors.designDescription && <span className="text-red-500 text-sm">Required</span>}
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Budget Range (₹)</label>
-        <input
-          {...register('budget')}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-          placeholder="e.g., 1500-2000"
-        />
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Delivery Date</label>
-        <input
-          type="date"
-          {...register('deliveryDate')}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
-        />
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Delivery Address</label>
-        <textarea {...register('deliveryAddress')} className="w-full px-3 py-2 border border-gray-300 rounded-lg" rows={3} />
-      </div>
+      <input
+        className="w-full border p-3 rounded-lg"
+        type="file"
+        accept="image/*"
+        multiple
+        onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
+      />
 
       <button
-        type="submit"
         disabled={submitting}
-        className="w-full bg-purple-600 text-white py-3 rounded-lg font-semibold hover:bg-purple-700 transition disabled:opacity-50"
+        className="w-full bg-pink-600 text-white py-3 rounded-lg font-semibold disabled:opacity-60"
       >
         {submitting ? 'Submitting...' : 'Submit Request'}
       </button>

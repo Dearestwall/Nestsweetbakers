@@ -1,22 +1,19 @@
-import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
-import './globals.css';
-import Header from '@/components/Header';
+import type { Metadata } from "next";
+import { Inter } from "next/font/google";
+import "./globals.css";
+import Header from "@/components/Header";
+import Footer from "@/components/Footer";
+import { CartProvider } from "@/context/CartContext";
+import { AuthProvider } from "@/context/AuthContext";
 
-const inter = Inter({ subsets: ['latin'] });
-// In the LoginForm component
-const handleAnonymousLogin = async () => {
-  const { signInAnonymously } = await import('firebase/auth');
-  const { auth } = await import('@/lib/firebase');
-  await signInAnonymously(auth);
-};
-<button onClick={handleAnonymousLogin} className="bg-gray-600 text-white px-4 py-2 rounded">
-  Login as Guest Admin
-</button>
+const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: `${process.env.NEXT_PUBLIC_BUSINESS_NAME} - Fresh Cakes in ${process.env.NEXT_PUBLIC_CITY_NAME}`,
-  description: `Order fresh custom cakes in ${process.env.NEXT_PUBLIC_CITY_NAME}. Home delivery & COD available.`,
+  title: "NestSweets - Freshly Baked Custom Cakes",
+  description: "Order custom cakes for all occasions. Fresh, delicious, and made with love.",
+  icons: {
+    icon: '/favicon.ico',
+  },
 };
 
 export default function RootLayout({
@@ -25,10 +22,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body className={inter.className}>
-        <Header />
-        <main className="min-h-screen bg-gray-50">{children}</main>
+    <html lang="en" className="scroll-smooth">
+      <body className={inter.className} suppressHydrationWarning>
+        <AuthProvider>
+          <CartProvider>
+            <Header />
+            <main className="min-h-screen">{children}</main>
+            <Footer />
+          </CartProvider>
+        </AuthProvider>
       </body>
     </html>
   );

@@ -1,135 +1,193 @@
 'use client';
 
+import { useEffect, useState } from 'react';
+import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { useState, useEffect } from 'react';
-import { onAuthChange, logoutAdmin } from '@/lib/auth';
-import { User } from 'firebase/auth';
-import { loginAdmin } from '@/lib/auth';
+import Image from 'next/image';
+import { useAuth } from '@/context/AuthContext';
+import { 
+  LayoutDashboard, 
+  ShoppingBag, 
+  Package, 
+  Star, 
+  MessageSquare, 
+  Image as ImageIcon, // ✅ RENAME THIS
+  Users,
+  Settings,
+  Menu,
+  X,
+  LogOut,
+  Home,
+  Shield
+} from 'lucide-react';
 
-export default function AdminLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function AdminLayout({ children }: { children: React.ReactNode }) {
+  const { user, isAdmin, isSuperAdmin, signOut } = useAuth();
+  const router = useRouter();
   const pathname = usePathname();
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = onAuthChange((user) => {
-      setUser(user);
-      setLoading(false);
-    });
-    return () => unsubscribe();
-  }, []);
+    if (user && !isAdmin) {
+      router.replace('/');
+    }
+  }, [user, isAdmin, router]);
 
-  const navItems = [
-    { href: '/admin', label: 'Dashboard' },
-    { href: '/admin/products', label: 'Products' },
-    { href: '/admin/orders', label: 'Orders' },
-    { href: '/admin/settings', label: 'Settings' },
-  ];
-
-  if (loading) {
-    return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
-  }
-
-  if (!user) {
+  if (!user || !isAdmin) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100">
-        <div className="bg-white p-8 rounded-xl shadow-sm max-w-md w-full">
-          <h1 className="text-2xl font-bold mb-6">Admin Login</h1>
-          <LoginForm />
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-pink-50 to-purple-50">
+        <div className="text-center">
+          <div className="relative w-24 h-24 mx-auto mb-6">
+            <div className="absolute inset-0 border-4 border-pink-200 rounded-full animate-ping"></div>
+            <div className="relative w-24 h-24 border-4 border-pink-600 border-t-transparent rounded-full animate-spin"></div>
+          </div>
+          <p className="text-gray-600 font-medium">Loading admin panel...</p>
         </div>
       </div>
     );
   }
 
+  const navItems = [
+    { icon: LayoutDashboard, label: 'Dashboard', href: '/admin' },
+    { icon: Package, label: 'Products', href: '/admin/products' },
+    { icon: ShoppingBag, label: 'Orders', href: '/admin/orders' },
+    { icon: MessageSquare, label: 'Custom Requests', href: '/admin/custom-requests' },
+    { icon: Star, label: 'Reviews', href: '/admin/reviews' },
+    { icon: ImageIcon, label: 'Hero Slides', href: '/admin/hero-slides' }, // ✅ USE RENAMED ICON
+    { icon: Users, label: 'Testimonials', href: '/admin/testimonials' },
+    ...(isSuperAdmin ? [{ icon: Shield, label: 'User Management', href: '/admin/users' }] : []),
+    { icon: Settings, label: 'Settings', href: '/admin/settings' },
+  ];
+
   return (
-    <div className="min-h-screen bg-gray-100">
-      <nav className="bg-white shadow-sm">
-        <div className="container mx-auto px-4">
-          <div className="flex justify-between items-center py-4">
-            <h1 className="text-2xl font-bold text-gray-800">Admin Panel</h1>
-            <div className="flex items-center gap-4">
-              <span className="text-gray-600">{user.email}</span>
-              <button
-                onClick={() => logoutAdmin()}
-                className="text-pink-600 hover:text-pink-700"
+    <div className="min-h-screen bg-gray-100 flex">
+      <aside className={`
+        fixed lg:static inset-y-0 left-0 z-50 w-64 bg-white shadow-lg transform transition-transform duration-300
+        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+      `}>
+        <div className="h-full flex flex-col">
+          <div className="p-6 border-b bg-gradient-to-r from-pink-600 to-purple-600 text-white">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-2xl">🍰</span>
+                <div>
+                  <span className="font-bold text-xl block">Admin Panel</span>
+                  {isSuperAdmin && (
+                    <span className="text-xs bg-yellow-400 text-yellow-900 px-2 py-0.5 rounded-full font-semibold mt-1 inline-block">
+                      Super Admin
+                    </span>
+                  )}
+                </div>
+              </div>
+              <button 
+                onClick={() => setSidebarOpen(false)}
+                className="lg:hidden hover:bg-white/10 p-1 rounded transition-colors"
               >
-                Logout
+                <X size={24} />
               </button>
-              <Link href="/" className="text-pink-600 hover:text-pink-700">
-                Back to Website
-              </Link>
             </div>
           </div>
-          <div className="flex space-x-6 pb-2">
-            {navItems.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`pb-2 border-b-2 ${
-                  pathname === item.href
-                    ? 'border-pink-600 text-pink-600'
-                    : 'border-transparent text-gray-600 hover:text-gray-800'
-                }`}
-              >
-                {item.label}
-              </Link>
-            ))}
+
+          <nav className="flex-1 overflow-y-auto p-4 space-y-2">
+            <Link
+              href="/"
+              className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-blue-50 transition-all duration-200 group text-blue-600 border border-blue-200 mb-2"
+            >
+              <Home size={20} className="text-blue-600" />
+              <span className="font-medium">Back to Website</span>
+            </Link>
+
+            <div className="border-t border-gray-200 my-2"></div>
+
+            {navItems.map((item) => {
+              const isActive = pathname === item.href;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={() => setSidebarOpen(false)}
+                  className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 group ${
+                    isActive 
+                      ? 'bg-pink-50 text-pink-600 shadow-sm' 
+                      : 'hover:bg-pink-50 text-gray-700'
+                  }`}
+                >
+                  <item.icon 
+                    size={20} 
+                    className={`transition-colors ${
+                      isActive 
+                        ? 'text-pink-600' 
+                        : 'text-gray-600 group-hover:text-pink-600'
+                    }`}
+                  />
+                  <span className={`font-medium ${
+                    isActive 
+                      ? 'text-pink-600' 
+                      : 'group-hover:text-pink-600'
+                  }`}>
+                    {item.label}
+                  </span>
+                </Link>
+              );
+            })}
+          </nav>
+
+          <div className="p-4 border-t bg-gray-50">
+            <div className="flex items-center gap-3 mb-4 px-4 py-3 bg-white rounded-lg shadow-sm">
+              <div className="w-10 h-10 bg-gradient-to-br from-pink-600 to-purple-600 rounded-full flex items-center justify-center text-white font-bold relative overflow-hidden">
+                {user.photoURL ? (
+                  <Image 
+                    src={user.photoURL} 
+                    alt={user.displayName || 'Admin'} 
+                    width={40}
+                    height={40}
+                    className="w-full h-full rounded-full object-cover"
+                  />
+                ) : (
+                  user.displayName?.charAt(0) || 'A'
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-sm truncate text-gray-800">{user.displayName || 'Admin'}</p>
+                <p className="text-xs text-gray-500 truncate">{user.email}</p>
+              </div>
+            </div>
+            <button
+              onClick={signOut}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 text-red-600 hover:bg-red-50 rounded-lg transition-colors font-medium shadow-sm hover:shadow-md"
+            >
+              <LogOut size={20} />
+              Sign Out
+            </button>
           </div>
         </div>
-      </nav>
-      <main className="container mx-auto px-4 py-8">{children}</main>
+      </aside>
+
+      {sidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden animate-fade-in"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      <div className="flex-1 flex flex-col min-w-0">
+        <header className="bg-white shadow-sm p-4 lg:hidden sticky top-0 z-30 border-b">
+          <div className="flex items-center justify-between">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="text-gray-600 hover:text-pink-600 transition-colors"
+            >
+              <Menu size={24} />
+            </button>
+            <span className="font-semibold text-gray-800">Admin Panel</span>
+            <div className="w-6"></div>
+          </div>
+        </header>
+
+        <main className="flex-1 overflow-y-auto p-6">
+          {children}
+        </main>
+      </div>
     </div>
-  );
-}
-
-function LoginForm() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      await loginAdmin(email, password);
-    } catch {
-      setError('Invalid credentials');
-    }
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-        <input
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-          required
-        />
-      </div>
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-        <input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-          required
-        />
-      </div>
-      {error && <p className="text-red-500 text-sm">{error}</p>}
-      <button
-        type="submit"
-        className="w-full bg-pink-600 text-white py-2 rounded-lg hover:bg-pink-700"
-      >
-        Login
-      </button>
-    </form>
   );
 }
