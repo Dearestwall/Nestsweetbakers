@@ -1,13 +1,22 @@
 'use client';
 
 import { useState } from 'react';
-import { addDoc, collection } from 'firebase/firestore';
+import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { useAuth } from '@/context/AuthContext';
+import { useToast } from '@/context/ToastContext';
 import { uploadMultipleToCloudinary } from '@/lib/cloudinary';
-import { Cake, Sparkles, Upload, X, ImageIcon } from 'lucide-react';
+import { Cake, Sparkles, Upload, X, ImageIcon, Loader2 } from 'lucide-react';
 import Image from 'next/image';
+import { useRouter } from 'next/navigation';
+import { generateCustomRequestWhatsAppMessage, notifyAdminViaWhatsApp } from '@/lib/whatsapp';
+import { notifyAdmins } from '@/lib/notificationUtils';
 
 export default function CustomCakesPage() {
+  const { user } = useAuth();
+  const { showSuccess, showError, showInfo } = useToast();
+  const router = useRouter();
+  
   const [formData, setFormData] = useState({
     name: '', phone: '', email: '', occasion: '', flavor: '',
     size: '', design: '', budget: '', deliveryDate: '', message: '',
@@ -21,7 +30,7 @@ export default function CustomCakesPage() {
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (files.length + referenceImages.length > 3) {
-      alert('Maximum 3 images allowed');
+      showError('Maximum 3 images allowed');
       return;
     }
 
@@ -43,116 +52,217 @@ export default function CustomCakesPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!user) {
+      showError('Please sign in to submit a custom cake request');
+      router.push('/login');
+      return;
+    }
+
     setLoading(true);
+    setUploadProgress('Preparing your request...');
 
     try {
       let imageUrls: string[] = [];
 
-      // Upload images to Cloudinary
       if (referenceImages.length > 0) {
-        setUploadProgress('Uploading images...');
+        setUploadProgress(`Uploading ${referenceImages.length} image(s)...`);
         imageUrls = await uploadMultipleToCloudinary(referenceImages);
       }
 
-      setUploadProgress('Saving request...');
+      setUploadProgress('Submitting your custom cake request...');
 
-      // Save to Firestore
-      const requestData = {
+      await addDoc(collection(db, 'customRequests'), {
         ...formData,
+        userId: user.uid,
+        userEmail: user.email,
+        userName: user.displayName || formData.name,
         referenceImages: imageUrls,
-        createdAt: new Date().toISOString(),
         status: 'pending',
-      };
+        createdAt: serverTimestamp(),
+      });
 
-      await addDoc(collection(db, 'customRequests'), requestData);
-
-      // WhatsApp message
-      const imageText = imageUrls.length > 0 ? `\n\nReference Images:\n${imageUrls.join('\n')}` : '';
-      const message = `🎂 *Custom Cake Request*\n\nName: ${formData.name}\nPhone: ${formData.phone}\nEmail: ${formData.email || 'N/A'}\nOccasion: ${formData.occasion}\nFlavor: ${formData.flavor}\nSize: ${formData.size}\nBudget: ₹${formData.budget}\nDelivery: ${formData.deliveryDate}\n\nDesign Details:\n${formData.design}\n\nMessage:\n${formData.message}${imageText}`;
-      
-      const whatsappUrl = `https://wa.me/911234567890?text=${encodeURIComponent(message)}`;
-      window.open(whatsappUrl, '_blank');
-
+      showSuccess('Custom cake request submitted! We\'ll contact you soon.');
       setSubmitted(true);
+
+      // Reset form
       setFormData({
         name: '', phone: '', email: '', occasion: '', flavor: '',
         size: '', design: '', budget: '', deliveryDate: '', message: '',
       });
       setReferenceImages([]);
       setImagePreviews([]);
-      setUploadProgress('');
+
+      // Redirect to orders page after 2 seconds
+      setTimeout(() => {
+        router.push('/orders');
+      }, 2000);
+
     } catch (error) {
-      console.error('Error:', error);
-      alert('Failed to submit. Please try again.');
+      console.error('Error submitting custom cake request:', error);
+      showError('Failed to submit request. Please try again.');
     } finally {
       setLoading(false);
+      setUploadProgress('');
     }
   };
 
+  if (submitted) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-pink-50 via-purple-50 to-white p-4">
+        <div className="bg-white rounded-2xl shadow-2xl p-8 md:p-12 max-w-md text-center">
+          <div className="w-20 h-20 bg-gradient-to-r from-green-500 to-emerald-500 rounded-full flex items-center justify-center mx-auto mb-6 animate-bounce">
+            <Sparkles className="text-white" size={40} />
+          </div>
+          <h2 className="text-3xl font-bold mb-4 bg-gradient-to-r from-pink-600 to-purple-600 bg-clip-text text-transparent">
+            Request Received!
+          </h2>
+          <p className="text-gray-600 mb-6">
+            Thank you! Our cake artists will contact you soon to discuss your dream cake design.
+          </p>
+          <p className="text-sm text-gray-500">Redirecting to your orders...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-50 to-purple-50 py-8 md:py-16">
+    <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-white py-8 md:py-12">
       <div className="container mx-auto px-4">
-        <div className="text-center mb-8 md:mb-12 animate-fade-in">
-          <Sparkles className="w-12 h-12 md:w-16 md:h-16 mx-auto mb-4 text-pink-600" />
-          <h1 className="text-3xl md:text-5xl font-bold mb-4">Design Your Dream Cake</h1>
-          <p className="text-base md:text-xl text-gray-600 max-w-2xl mx-auto">
-            Tell us your vision and we&apos;ll create a masterpiece just for you!
+        {/* Header */}
+        <div className="text-center mb-8 md:mb-12">
+          <div className="flex items-center justify-center gap-3 mb-4">
+            <Cake className="text-pink-600" size={40} />
+            <h1 className="text-3xl md:text-5xl font-bold bg-gradient-to-r from-pink-600 to-purple-600 bg-clip-text text-transparent">
+              Design Your Dream Cake
+            </h1>
+          </div>
+          <p className="text-gray-600 text-base md:text-lg max-w-2xl mx-auto">
+            Tell us about your perfect cake and we&apos;ll bring it to life! Upload reference images and share your ideas.
           </p>
         </div>
 
-        <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-2xl p-6 md:p-8">
-          {submitted ? (
-            <div className="text-center py-12 animate-bounce-in">
-              <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
-                <Cake className="w-10 h-10 text-green-600" />
-              </div>
-              <h3 className="text-2xl font-bold mb-4 text-green-600">Request Submitted!</h3>
-              <p className="text-gray-600 mb-6">
-                We&apos;ve received your custom cake request. Our team will contact you shortly via WhatsApp!
-              </p>
-              <button
-                onClick={() => setSubmitted(false)}
-                className="bg-pink-600 text-white px-6 py-3 rounded-full hover:bg-pink-700 transition"
-              >
-                Submit Another Request
-              </button>
-            </div>
-          ) : (
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="max-w-4xl mx-auto bg-white rounded-2xl shadow-2xl p-6 md:p-10">
+          <div className="space-y-6">
+            {/* Contact Information */}
+            <div>
+              <h2 className="text-xl md:text-2xl font-bold mb-4 flex items-center gap-2">
+                <span className="w-8 h-8 bg-pink-600 text-white rounded-full flex items-center justify-center text-sm">1</span>
+                Contact Information
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <input
                   type="text"
                   placeholder="Your Name *"
-                  required
                   value={formData.name}
-                  onChange={e => setFormData({...formData, name: e.target.value})}
-                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-pink-500 focus:outline-none transition"
+                  onChange={(e) => setFormData({...formData, name: e.target.value})}
+                  required
+                  className="px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all"
                 />
                 <input
                   type="tel"
                   placeholder="Phone Number *"
-                  required
                   value={formData.phone}
-                  onChange={e => setFormData({...formData, phone: e.target.value})}
-                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-pink-500 focus:outline-none transition"
+                  onChange={(e) => setFormData({...formData, phone: e.target.value})}
+                  required
+                  className="px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all"
+                />
+                <input
+                  type="email"
+                  placeholder="Email Address"
+                  value={formData.email}
+                  onChange={(e) => setFormData({...formData, email: e.target.value})}
+                  className="px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all md:col-span-2"
                 />
               </div>
+            </div>
 
-              <input
-                type="email"
-                placeholder="Email (optional)"
-                value={formData.email}
-                onChange={e => setFormData({...formData, email: e.target.value})}
-                className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-pink-500 focus:outline-none transition"
+            {/* Cake Details */}
+            <div>
+              <h2 className="text-xl md:text-2xl font-bold mb-4 flex items-center gap-2">
+                <span className="w-8 h-8 bg-pink-600 text-white rounded-full flex items-center justify-center text-sm">2</span>
+                Cake Details
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <select
+                  value={formData.occasion}
+                  onChange={(e) => setFormData({...formData, occasion: e.target.value})}
+                  required
+                  className="px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all"
+                >
+                  <option value="">Select Occasion *</option>
+                  <option value="Birthday">Birthday</option>
+                  <option value="Wedding">Wedding</option>
+                  <option value="Anniversary">Anniversary</option>
+                  <option value="Baby Shower">Baby Shower</option>
+                  <option value="Corporate Event">Corporate Event</option>
+                  <option value="Other">Other</option>
+                </select>
+
+                <input
+                  type="text"
+                  placeholder="Flavor (e.g., Chocolate, Vanilla) *"
+                  value={formData.flavor}
+                  onChange={(e) => setFormData({...formData, flavor: e.target.value})}
+                  required
+                  className="px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all"
+                />
+
+                <input
+                  type="text"
+                  placeholder="Size (e.g., 2kg, 3 tiers) *"
+                  value={formData.size}
+                  onChange={(e) => setFormData({...formData, size: e.target.value})}
+                  required
+                  className="px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all"
+                />
+
+                <input
+                  type="number"
+                  placeholder="Budget (₹) *"
+                  value={formData.budget}
+                  onChange={(e) => setFormData({...formData, budget: e.target.value})}
+                  required
+                  className="px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all"
+                />
+
+                <input
+                  type="date"
+                  placeholder="Delivery Date *"
+                  value={formData.deliveryDate}
+                  onChange={(e) => setFormData({...formData, deliveryDate: e.target.value})}
+                  required
+                  min={new Date().toISOString().split('T')[0]}
+                  className="px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all md:col-span-2"
+                />
+              </div>
+            </div>
+
+            {/* Design Description */}
+            <div>
+              <h2 className="text-xl md:text-2xl font-bold mb-4 flex items-center gap-2">
+                <span className="w-8 h-8 bg-pink-600 text-white rounded-full flex items-center justify-center text-sm">3</span>
+                Design Description
+              </h2>
+              <textarea
+                placeholder="Describe your dream cake design... (colors, theme, decorations, etc.) *"
+                value={formData.design}
+                onChange={(e) => setFormData({...formData, design: e.target.value})}
+                required
+                rows={5}
+                className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all resize-none"
               />
+            </div>
 
-              {/* Image Upload Section */}
-              <div className="border-2 border-dashed border-pink-300 rounded-lg p-6 bg-pink-50">
-                <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
-                  <ImageIcon size={20} className="text-pink-600" />
-                  Upload Reference Images (Optional - Max 3)
-                </h3>
-                
+            {/* Reference Images */}
+            <div>
+              <h2 className="text-xl md:text-2xl font-bold mb-4 flex items-center gap-2">
+                <span className="w-8 h-8 bg-pink-600 text-white rounded-full flex items-center justify-center text-sm">4</span>
+                Reference Images (Optional)
+              </h2>
+              
+              <div className="border-2 border-dashed border-gray-300 rounded-xl p-6 md:p-8 text-center hover:border-pink-500 transition-colors">
                 <input
                   type="file"
                   accept="image/*"
@@ -160,151 +270,88 @@ export default function CustomCakesPage() {
                   onChange={handleImageUpload}
                   className="hidden"
                   id="image-upload"
-                  disabled={loading}
+                  disabled={referenceImages.length >= 3}
                 />
-                
-                {imagePreviews.length < 3 && (
-                  <label
-                    htmlFor="image-upload"
-                    className={`block w-full py-4 text-center bg-white hover:bg-pink-100 rounded-lg cursor-pointer transition border-2 border-pink-200 ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    <Upload className="mx-auto mb-2 text-pink-600" size={24} />
-                    <span className="text-pink-600 font-semibold">Click to upload images</span>
-                    <p className="text-xs text-gray-500 mt-1">PNG, JPG up to 5MB each</p>
-                  </label>
-                )}
+                <label
+                  htmlFor="image-upload"
+                  className={`cursor-pointer ${referenceImages.length >= 3 ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  <Upload className="mx-auto mb-3 text-gray-400" size={48} />
+                  <p className="text-gray-600 mb-2">
+                    Click to upload reference images (Max 3)
+                  </p>
+                  <p className="text-sm text-gray-500">
+                    Upload images of cakes you like
+                  </p>
+                </label>
+              </div>
 
-                {imagePreviews.length > 0 && (
-                  <div className="grid grid-cols-3 gap-4 mt-4">
-                    {imagePreviews.map((preview, index) => (
-                      <div key={index} className="relative group">
+              {imagePreviews.length > 0 && (
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-4">
+                  {imagePreviews.map((preview, index) => (
+                    <div key={index} className="relative group">
+                      <div className="relative h-32 md:h-40 rounded-xl overflow-hidden">
                         <Image
                           src={preview}
-                          alt={`Preview ${index + 1}`}
-                          width={200}
-                          height={200}
-                          className="w-full h-32 object-cover rounded-lg border-2 border-pink-200"
+                          alt={`Reference ${index + 1}`}
+                          fill
+                          className="object-cover"
+                          sizes="(max-width: 768px) 50vw, 33vw"
                         />
-                        <button
-                          type="button"
-                          onClick={() => removeImage(index)}
-                          disabled={loading}
-                          className="absolute top-2 right-2 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition hover:bg-red-600"
-                        >
-                          <X size={16} />
-                        </button>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <select
-                  required
-                  value={formData.occasion}
-                  onChange={e => setFormData({...formData, occasion: e.target.value})}
-                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-pink-500 focus:outline-none transition"
-                >
-                  <option value="">Occasion *</option>
-                  <option value="Birthday">Birthday</option>
-                  <option value="Wedding">Wedding</option>
-                  <option value="Anniversary">Anniversary</option>
-                  <option value="Engagement">Engagement</option>
-                  <option value="Corporate">Corporate Event</option>
-                  <option value="Other">Other</option>
-                </select>
-
-                <select
-                  required
-                  value={formData.flavor}
-                  onChange={e => setFormData({...formData, flavor: e.target.value})}
-                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-pink-500 focus:outline-none transition"
-                >
-                  <option value="">Flavor *</option>
-                  <option value="Chocolate">Chocolate</option>
-                  <option value="Vanilla">Vanilla</option>
-                  <option value="Red Velvet">Red Velvet</option>
-                  <option value="Butterscotch">Butterscotch</option>
-                  <option value="Black Forest">Black Forest</option>
-                  <option value="Pineapple">Pineapple</option>
-                  <option value="Custom Mix">Custom Mix</option>
-                </select>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <select
-                  required
-                  value={formData.size}
-                  onChange={e => setFormData({...formData, size: e.target.value})}
-                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-pink-500 focus:outline-none transition"
-                >
-                  <option value="">Size *</option>
-                  <option value="0.5kg">0.5 kg</option>
-                  <option value="1kg">1 kg</option>
-                  <option value="1.5kg">1.5 kg</option>
-                  <option value="2kg">2 kg</option>
-                  <option value="3kg">3 kg</option>
-                  <option value="5kg+">5 kg or more</option>
-                </select>
-
-                <input
-                  type="number"
-                  placeholder="Budget (₹) *"
-                  required
-                  value={formData.budget}
-                  onChange={e => setFormData({...formData, budget: e.target.value})}
-                  min="100"
-                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-pink-500 focus:outline-none transition"
-                />
-              </div>
-
-              <input
-                type="date"
-                required
-                value={formData.deliveryDate}
-                onChange={e => setFormData({...formData, deliveryDate: e.target.value})}
-                min={new Date(Date.now() + 86400000).toISOString().split('T')[0]}
-                className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-pink-500 focus:outline-none transition"
-              />
-
-              <textarea
-                placeholder="Design Details (colors, theme, decorations, text on cake, etc.) *"
-                required
-                value={formData.design}
-                onChange={e => setFormData({...formData, design: e.target.value})}
-                rows={4}
-                className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-pink-500 focus:outline-none transition"
-              />
-
-              <textarea
-                placeholder="Any special message or additional requirements?"
-                value={formData.message}
-                onChange={e => setFormData({...formData, message: e.target.value})}
-                rows={3}
-                className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-pink-500 focus:outline-none transition"
-              />
-
-              {uploadProgress && (
-                <div className="text-center py-2 text-pink-600 font-semibold">
-                  {uploadProgress}
+                      <button
+                        type="button"
+                        onClick={() => removeImage(index)}
+                        className="absolute top-2 right-2 bg-red-500 text-white p-2 rounded-full hover:bg-red-600 transition-all opacity-0 group-hover:opacity-100"
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                  ))}
                 </div>
               )}
+            </div>
 
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full bg-gradient-to-r from-pink-600 to-purple-600 text-white py-4 rounded-lg font-bold text-lg hover:from-pink-700 hover:to-purple-700 transition disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
-              >
-                {loading ? 'Processing...' : 'Submit Custom Cake Request'}
-              </button>
+            {/* Additional Message */}
+            <div>
+              <h2 className="text-xl md:text-2xl font-bold mb-4 flex items-center gap-2">
+                <span className="w-8 h-8 bg-pink-600 text-white rounded-full flex items-center justify-center text-sm">5</span>
+                Additional Message
+              </h2>
+              <textarea
+                placeholder="Any special requests, dietary requirements, or additional notes..."
+                value={formData.message}
+                onChange={(e) => setFormData({...formData, message: e.target.value})}
+                rows={3}
+                className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all resize-none"
+              />
+            </div>
 
-              <p className="text-xs text-gray-500 text-center">
-                You&apos;ll be redirected to WhatsApp to confirm your order with our team
-              </p>
-            </form>
-          )}
-        </div>
+            {/* Submit Button */}
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-gradient-to-r from-pink-600 to-purple-600 text-white py-4 md:py-5 rounded-xl font-bold text-base md:text-lg hover:from-pink-700 hover:to-purple-700 transition-all transform hover:scale-105 shadow-lg hover:shadow-2xl disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-3"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="animate-spin" size={24} />
+                  {uploadProgress || 'Submitting...'}
+                </>
+              ) : (
+                <>
+                  <Sparkles size={24} />
+                  Submit Custom Cake Request
+                </>
+              )}
+            </button>
+
+            <p className="text-center text-sm text-gray-500">
+              {!user && '⚠️ Please sign in to submit a request. '}
+              We&apos;ll contact you within 24 hours to confirm your design and pricing.
+            </p>
+          </div>
+        </form>
       </div>
     </div>
   );
