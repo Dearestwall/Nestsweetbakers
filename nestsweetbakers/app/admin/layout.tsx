@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
-import Image from 'next/image';
 import { useAuth } from '@/context/AuthContext';
 import { 
   LayoutDashboard, 
@@ -19,7 +18,10 @@ import {
   LogOut,
   Home,
   Shield,
-  FileText
+  FileText,
+  Gift,
+  Bell,
+  ChevronRight
 } from 'lucide-react';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -27,6 +29,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const router = useRouter();
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [confirmLogout, setConfirmLogout] = useState(false);
 
   useEffect(() => {
     if (user && !isAdmin) {
@@ -38,81 +41,127 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-pink-50 to-purple-50">
         <div className="text-center">
-          <div className="relative w-20 h-20 sm:w-24 sm:h-24 mx-auto mb-6">
+          <div className="relative w-24 h-24 mx-auto mb-6">
             <div className="absolute inset-0 border-4 border-pink-200 rounded-full animate-ping"></div>
-            <div className="relative w-20 h-20 sm:w-24 sm:h-24 border-4 border-pink-600 border-t-transparent rounded-full animate-spin"></div>
+            <div className="relative w-24 h-24 border-4 border-pink-600 border-t-transparent rounded-full animate-spin"></div>
           </div>
-          <p className="text-gray-600 font-medium text-sm sm:text-base">Loading admin panel...</p>
+          <p className="text-gray-600 font-semibold text-lg">Loading admin panel...</p>
+          <p className="text-gray-500 text-sm mt-2">Verifying credentials...</p>
         </div>
       </div>
     );
   }
 
   const navItems = [
-    { icon: LayoutDashboard, label: 'Dashboard', href: '/admin' },
-    { icon: Package, label: 'Products', href: '/admin/products' },
-    { icon: ShoppingBag, label: 'Orders', href: '/admin/orders' },
-    { icon: MessageSquare, label: 'Custom Requests', href: '/admin/custom-requests' },
-    { icon: Star, label: 'Reviews', href: '/admin/reviews' },
-    { icon: ImageIcon, label: 'Hero Slides', href: '/admin/hero-slides' },
-    { icon: FileText, label: 'Testimonials', href: '/admin/testimonials' },
-    ...(isSuperAdmin ? [{ icon: Shield, label: 'User Management', href: '/admin/users' }] : []),
-    { icon: Settings, label: 'Settings', href: '/admin/settings' },
+    { icon: LayoutDashboard, label: 'Dashboard', href: '/admin', badge: null },
+    { icon: Package, label: 'Products', href: '/admin/products', badge: null },
+    { icon: ShoppingBag, label: 'Orders', href: '/admin/orders', badge: '5' },
+    { icon: Gift, label: 'Custom Requests', href: '/admin/custom-requests', badge: '3' },
+    { icon: Star, label: 'Reviews', href: '/admin/reviews', badge: null },
+    { icon: ImageIcon, label: 'Hero Slides', href: '/admin/hero-slides', badge: null },
+    { icon: FileText, label: 'Testimonials', href: '/admin/testimonials', badge: null },
+    ...(isSuperAdmin ? [{ icon: Shield, label: 'User Management', href: '/admin/users', badge: null }] : []),
+    { icon: Settings, label: 'Settings', href: '/admin/settings', badge: null },
   ];
 
+  const handleSignOut = () => {
+    setConfirmLogout(true);
+  };
+
+  const confirmSignOut = async () => {
+    await signOut();
+    setConfirmLogout(false);
+    router.push('/login');
+  };
+
   return (
-    <div className="min-h-screen bg-gray-50 flex overflow-hidden">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex overflow-hidden">
       {/* Mobile Overlay */}
       {sidebarOpen && (
         <div 
-          className="fixed inset-0 bg-black/50 z-40 lg:hidden animate-fade-in"
+          className="fixed inset-0 bg-black/60 z-40 lg:hidden animate-fade-in backdrop-blur-sm"
           onClick={() => setSidebarOpen(false)}
         />
       )}
 
+      {/* Logout Confirmation Modal */}
+      {confirmLogout && (
+        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 animate-scale-up">
+            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <LogOut className="text-red-600" size={32} />
+            </div>
+            <h3 className="text-2xl font-bold text-center text-gray-800 mb-2">Sign Out?</h3>
+            <p className="text-gray-600 text-center mb-6">
+              Are you sure you want to sign out from the admin panel?
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setConfirmLogout(false)}
+                className="flex-1 px-4 py-3 bg-gray-100 text-gray-700 rounded-xl font-semibold hover:bg-gray-200 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmSignOut}
+                className="flex-1 px-4 py-3 bg-red-600 text-white rounded-xl font-semibold hover:bg-red-700 transition-all"
+              >
+                Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Sidebar */}
       <aside className={`
-        fixed lg:sticky top-0 left-0 h-screen z-50 w-64 sm:w-72 lg:w-64 xl:w-72
-        bg-white shadow-2xl transform transition-transform duration-300 ease-in-out
+        fixed lg:sticky top-0 left-0 h-screen z-50 w-72 lg:w-80
+        bg-white shadow-2xl transform transition-all duration-300 ease-out
         flex flex-col
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
       `}>
         {/* Sidebar Header */}
-        <div className="p-4 sm:p-6 border-b bg-gradient-to-r from-pink-600 to-purple-600 text-white flex-shrink-0">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 sm:gap-3">
-              <span className="text-2xl sm:text-3xl">🍰</span>
-              <div>
-                <span className="font-bold text-lg sm:text-xl block leading-tight">Admin Panel</span>
-                {isSuperAdmin && (
-                  <span className="text-[10px] sm:text-xs bg-yellow-400 text-yellow-900 px-2 py-0.5 rounded-full font-semibold mt-1 inline-block">
-                    Super Admin
-                  </span>
-                )}
+        <div className="p-6 border-b bg-gradient-to-r from-pink-600 to-purple-600 text-white flex-shrink-0 relative overflow-hidden">
+          <div className="absolute inset-0 bg-white/10 backdrop-blur-sm"></div>
+          <div className="relative z-10">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <span className="text-4xl animate-bounce-slow">🍰</span>
+                <div>
+                  <span className="font-bold text-2xl block leading-tight">Admin Panel</span>
+                  <span className="text-xs text-pink-100">NestSweets Bakery</span>
+                </div>
               </div>
+              <button 
+                onClick={() => setSidebarOpen(false)}
+                className="lg:hidden hover:bg-white/20 p-2 rounded-lg transition-colors"
+                aria-label="Close menu"
+              >
+                <X size={24} />
+              </button>
             </div>
-            <button 
-              onClick={() => setSidebarOpen(false)}
-              className="lg:hidden hover:bg-white/10 p-1.5 rounded transition-colors"
-              aria-label="Close menu"
-            >
-              <X size={24} />
-            </button>
+            {isSuperAdmin && (
+              <div className="bg-yellow-400 text-yellow-900 px-3 py-1.5 rounded-full text-xs font-bold inline-flex items-center gap-2">
+                <Shield size={14} />
+                Super Admin Access
+              </div>
+            )}
           </div>
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-1 scrollbar-thin scrollbar-thumb-gray-300">
+        <nav className="flex-1 overflow-y-auto p-4 space-y-2 scrollbar-thin scrollbar-thumb-gray-300">
           <Link
             href="/"
             onClick={() => setSidebarOpen(false)}
-            className="flex items-center gap-3 px-3 sm:px-4 py-2.5 sm:py-3 rounded-lg hover:bg-blue-50 transition-all duration-200 group text-blue-600 border border-blue-200 mb-3"
+            className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-blue-50 transition-all duration-200 group text-blue-600 border-2 border-blue-200 mb-4 hover:border-blue-300"
           >
-            <Home size={18} className="flex-shrink-0" />
-            <span className="font-medium text-sm sm:text-base">Back to Website</span>
+            <Home size={20} className="flex-shrink-0" />
+            <span className="font-semibold">Back to Website</span>
+            <ChevronRight size={16} className="ml-auto group-hover:translate-x-1 transition-transform" />
           </Link>
 
-          <div className="border-t border-gray-200 my-2"></div>
+          <div className="border-t border-gray-200 mb-4"></div>
 
           {navItems.map((item) => {
             const isActive = pathname === item.href;
@@ -121,56 +170,64 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 key={item.href}
                 href={item.href}
                 onClick={() => setSidebarOpen(false)}
-                className={`flex items-center gap-3 px-3 sm:px-4 py-2.5 sm:py-3 rounded-lg transition-all duration-200 group ${
+                className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group relative ${
                   isActive 
-                    ? 'bg-pink-50 text-pink-600 shadow-sm' 
+                    ? 'bg-gradient-to-r from-pink-500 to-purple-500 text-white shadow-lg' 
                     : 'hover:bg-pink-50 text-gray-700 hover:text-pink-600'
                 }`}
               >
                 <item.icon 
-                  size={18} 
+                  size={20} 
                   className={`transition-colors flex-shrink-0 ${
-                    isActive ? 'text-pink-600' : 'text-gray-600 group-hover:text-pink-600'
+                    isActive ? 'text-white' : 'text-gray-600 group-hover:text-pink-600'
                   }`}
                 />
-                <span className={`font-medium text-sm sm:text-base truncate ${
-                  isActive ? 'text-pink-600' : 'group-hover:text-pink-600'
+                <span className={`font-medium truncate ${
+                  isActive ? 'text-white' : 'group-hover:text-pink-600'
                 }`}>
                   {item.label}
                 </span>
+                {item.badge && (
+                  <span className="ml-auto bg-red-500 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center animate-pulse">
+                    {item.badge}
+                  </span>
+                )}
+                {isActive && (
+                  <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-white rounded-l-full"></div>
+                )}
               </Link>
             );
           })}
         </nav>
 
         {/* User Info & Logout */}
-        <div className="p-3 sm:p-4 border-t bg-gray-50 flex-shrink-0">
-          <div className="flex items-center gap-2 sm:gap-3 mb-3 px-3 sm:px-4 py-2 sm:py-3 bg-white rounded-lg shadow-sm">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 bg-gradient-to-br from-pink-600 to-purple-600 rounded-full flex items-center justify-center text-white font-bold relative overflow-hidden flex-shrink-0">
+        <div className="p-4 border-t bg-gradient-to-br from-gray-50 to-gray-100 flex-shrink-0">
+          <div className="flex items-center gap-3 mb-3 px-4 py-3 bg-white rounded-xl shadow-sm">
+            <div className="w-12 h-12 bg-gradient-to-br from-pink-600 to-purple-600 rounded-full flex items-center justify-center text-white font-bold text-lg relative overflow-hidden flex-shrink-0">
               {user.photoURL ? (
-                <Image 
+                // eslint-disable-next-line @next/next/no-img-element
+                <img 
                   src={user.photoURL} 
                   alt={user.displayName || 'Admin'} 
-                  width={40}
-                  height={40}
                   className="w-full h-full rounded-full object-cover"
                 />
               ) : (
-                <span className="text-sm sm:text-base">{user.displayName?.charAt(0) || 'A'}</span>
+                <span>{user.displayName?.charAt(0) || 'A'}</span>
               )}
+              <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></div>
             </div>
             <div className="flex-1 min-w-0">
-              <p className="font-semibold text-xs sm:text-sm truncate text-gray-800">
+              <p className="font-bold text-sm truncate text-gray-800">
                 {user.displayName || 'Admin'}
               </p>
-              <p className="text-[10px] sm:text-xs text-gray-500 truncate">{user.email}</p>
+              <p className="text-xs text-gray-500 truncate">{user.email}</p>
             </div>
           </div>
           <button
-            onClick={signOut}
-            className="w-full flex items-center justify-center gap-2 px-3 sm:px-4 py-2 sm:py-3 text-red-600 hover:bg-red-50 rounded-lg transition-colors font-medium shadow-sm hover:shadow-md text-sm sm:text-base"
+            onClick={handleSignOut}
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 text-red-600 hover:bg-red-50 rounded-xl transition-all font-semibold shadow-sm hover:shadow-md border-2 border-red-200 hover:border-red-300"
           >
-            <LogOut size={18} className="flex-shrink-0" />
+            <LogOut size={20} className="flex-shrink-0" />
             <span>Sign Out</span>
           </button>
         </div>
@@ -179,29 +236,96 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
         {/* Mobile Header */}
-        <header className="lg:hidden bg-white shadow-sm p-3 sm:p-4 flex-shrink-0 border-b sticky top-0 z-30">
+        <header className="lg:hidden bg-white shadow-md p-4 flex-shrink-0 border-b sticky top-0 z-30">
           <div className="flex items-center justify-between">
             <button
               onClick={() => setSidebarOpen(true)}
-              className="text-gray-600 hover:text-pink-600 transition-colors p-2 -ml-2"
+              className="text-gray-600 hover:text-pink-600 transition-colors p-2 -ml-2 hover:bg-pink-50 rounded-lg"
               aria-label="Open menu"
             >
               <Menu size={24} />
             </button>
-            <span className="font-semibold text-gray-800 text-sm sm:text-base truncate px-2">
-              {navItems.find(item => item.href === pathname)?.label || 'Admin Panel'}
-            </span>
-            <div className="w-10"></div>
+            <div className="flex items-center gap-2">
+              <span className="text-xl">🍰</span>
+              <span className="font-bold text-gray-800 truncate">
+                {navItems.find(item => item.href === pathname)?.label || 'Admin Panel'}
+              </span>
+            </div>
+            <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors relative">
+              <Bell size={24} className="text-gray-600" />
+              <span className="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
+            </button>
           </div>
         </header>
 
         {/* Content Area */}
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+        <main className="flex-1 overflow-y-auto p-6 lg:p-8">
           <div className="max-w-7xl mx-auto">
             {children}
           </div>
         </main>
       </div>
+
+      <style jsx global>{`
+        @keyframes bounce-slow {
+          0%, 100% {
+            transform: translateY(0);
+          }
+          50% {
+            transform: translateY(-10px);
+          }
+        }
+        
+        @keyframes fade-in {
+          from {
+            opacity: 0;
+          }
+          to {
+            opacity: 1;
+          }
+        }
+        
+        @keyframes scale-up {
+          from {
+            opacity: 0;
+            transform: scale(0.9);
+          }
+          to {
+            opacity: 1;
+            transform: scale(1);
+          }
+        }
+        
+        .animate-bounce-slow {
+          animation: bounce-slow 2s infinite;
+        }
+        
+        .animate-fade-in {
+          animation: fade-in 0.3s ease-out;
+        }
+        
+        .animate-scale-up {
+          animation: scale-up 0.3s ease-out;
+        }
+
+        .scrollbar-thin::-webkit-scrollbar {
+          width: 6px;
+        }
+
+        .scrollbar-thin::-webkit-scrollbar-track {
+          background: #f1f1f1;
+          border-radius: 10px;
+        }
+
+        .scrollbar-thin::-webkit-scrollbar-thumb {
+          background: #d1d5db;
+          border-radius: 10px;
+        }
+
+        .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+          background: #9ca3af;
+        }
+      `}</style>
     </div>
   );
 }
