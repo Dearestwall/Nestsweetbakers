@@ -4,7 +4,8 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
-import { Mail, Lock, User as UserIcon, Loader2, AlertCircle, CheckCircle } from 'lucide-react';
+import { useToast } from '@/context/ToastContext';
+import { Mail, Lock, User as UserIcon, Loader2, CheckCircle } from 'lucide-react';
 
 export default function SignupPage() {
   const [name, setName] = useState('');
@@ -12,8 +13,8 @@ export default function SignupPage() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
   const { user, signIn, signUpWithEmail } = useAuth();
+  const { showError, showSuccess } = useToast();
   const router = useRouter();
 
   useEffect(() => {
@@ -31,33 +32,29 @@ export default function SignupPage() {
       case 'auth/invalid-email':
         return 'Invalid email address format.';
       case 'auth/operation-not-allowed':
-        return 'Email/password accounts are not enabled. Please contact support.';
+        return 'Email/password sign-up is disabled. Please contact support.';
       case 'auth/weak-password':
-        return 'Password is too weak. Please use at least 6 characters.';
-      case 'auth/network-request-failed':
-        return 'Network error. Please check your internet connection.';
+        return 'Password is too weak. Use at least 6 characters.';
       default:
-        return error.message || 'Failed to create account. Please try again.';
+        return error.message || 'Failed to create account.';
     }
   };
 
   const handleEmailSignup = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
 
-    // Validation
     if (!name.trim()) {
-      setError('Please enter your name');
+      showError('Please enter your name');
       return;
     }
 
     if (password !== confirmPassword) {
-      setError('Passwords do not match');
+      showError('Passwords do not match');
       return;
     }
 
     if (password.length < 6) {
-      setError('Password must be at least 6 characters');
+      showError('Password must be at least 6 characters');
       return;
     }
 
@@ -65,25 +62,26 @@ export default function SignupPage() {
 
     try {
       await signUpWithEmail(email, password, name);
+      showSuccess('Account created successfully! Welcome to NestSweets.');
       router.push('/');
     } catch (err: any) {
       console.error('Signup error:', err);
-      setError(getErrorMessage(err));
+      showError(getErrorMessage(err));
     } finally {
       setLoading(false);
     }
   };
 
   const handleGoogleSignup = async () => {
-    setError('');
     setLoading(true);
 
     try {
       await signIn();
+      showSuccess('Account created successfully with Google!');
       router.push('/');
     } catch (err: any) {
       console.error('Google signup error:', err);
-      setError(getErrorMessage(err));
+      showError(getErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -109,13 +107,6 @@ export default function SignupPage() {
         </div>
 
         <div className="bg-white rounded-2xl shadow-2xl p-8 space-y-6">
-          {error && (
-            <div className="bg-red-50 border-2 border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm flex items-start gap-3">
-              <AlertCircle className="flex-shrink-0 mt-0.5" size={18} />
-              <span>{error}</span>
-            </div>
-          )}
-
           <form onSubmit={handleEmailSignup} className="space-y-4">
             <div>
               <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-2">
@@ -173,9 +164,6 @@ export default function SignupPage() {
                   autoComplete="new-password"
                 />
               </div>
-              {password && password.length < 6 && (
-                <p className="text-xs text-red-600 mt-1">Password must be at least 6 characters</p>
-              )}
               {password && password.length >= 6 && (
                 <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
                   <CheckCircle size={12} /> Password strength: Good
@@ -200,9 +188,6 @@ export default function SignupPage() {
                   autoComplete="new-password"
                 />
               </div>
-              {confirmPassword && password !== confirmPassword && (
-                <p className="text-xs text-red-600 mt-1">Passwords do not match</p>
-              )}
               {confirmPassword && password === confirmPassword && password.length >= 6 && (
                 <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
                   <CheckCircle size={12} /> Passwords match
@@ -254,10 +239,6 @@ export default function SignupPage() {
             <Link href="/login" className="text-pink-600 hover:text-pink-700 font-semibold">
               Sign in
             </Link>
-          </p>
-
-          <p className="text-xs text-gray-500 text-center">
-            By signing up, you agree to our Terms of Service and Privacy Policy
           </p>
         </div>
       </div>

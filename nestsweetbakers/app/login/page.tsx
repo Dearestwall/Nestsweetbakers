@@ -4,14 +4,15 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
-import { Mail, Lock, Loader2, AlertCircle } from 'lucide-react';
+import { useToast } from '@/context/ToastContext';
+import { Mail, Lock, Loader2 } from 'lucide-react';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
   const { user, signIn, signInWithEmail } = useAuth();
+  const { showError, showSuccess } = useToast();
   const router = useRouter();
 
   useEffect(() => {
@@ -25,19 +26,19 @@ export default function LoginPage() {
     
     switch (errorCode) {
       case 'auth/invalid-credential':
-        return 'Invalid email or password. Please check your credentials and try again.';
+        return 'Invalid email or password. Please check your credentials or sign up first.';
       case 'auth/user-not-found':
-        return 'No account found with this email. Please sign up first.';
+        return 'No account found. Please sign up first.';
       case 'auth/wrong-password':
         return 'Incorrect password. Please try again.';
       case 'auth/invalid-email':
         return 'Invalid email address format.';
       case 'auth/user-disabled':
-        return 'This account has been disabled. Please contact support.';
+        return 'This account has been disabled.';
       case 'auth/too-many-requests':
         return 'Too many failed attempts. Please try again later.';
       case 'auth/network-request-failed':
-        return 'Network error. Please check your internet connection.';
+        return 'Network error. Check your connection.';
       default:
         return error.message || 'Failed to sign in. Please try again.';
     }
@@ -45,30 +46,30 @@ export default function LoginPage() {
 
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
     setLoading(true);
 
     try {
       await signInWithEmail(email, password);
+      showSuccess('Welcome back! Signed in successfully.');
       router.push('/');
     } catch (err: any) {
       console.error('Login error:', err);
-      setError(getErrorMessage(err));
+      showError(getErrorMessage(err));
     } finally {
       setLoading(false);
     }
   };
 
   const handleGoogleLogin = async () => {
-    setError('');
     setLoading(true);
 
     try {
       await signIn();
+      showSuccess('Welcome! Signed in with Google successfully.');
       router.push('/');
     } catch (err: any) {
       console.error('Google login error:', err);
-      setError(getErrorMessage(err));
+      showError(getErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -94,13 +95,6 @@ export default function LoginPage() {
         </div>
 
         <div className="bg-white rounded-2xl shadow-2xl p-8 space-y-6">
-          {error && (
-            <div className="bg-red-50 border-2 border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm flex items-start gap-3">
-              <AlertCircle className="flex-shrink-0 mt-0.5" size={18} />
-              <span>{error}</span>
-            </div>
-          )}
-
           <form onSubmit={handleEmailLogin} className="space-y-4">
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
