@@ -5,6 +5,7 @@ import ClientLayout from "@/components/ClientLayout";
 import { CartProvider } from "@/context/CartContext";
 import { AuthProvider } from "@/context/AuthContext";
 import { ToastProvider } from "@/context/ToastContext";
+import { SettingsProvider } from "@/hooks/useSettings";
 
 const inter = Inter({ 
   subsets: ["latin"],
@@ -122,9 +123,11 @@ export default function RootLayout({
       <body className={`${inter.className} antialiased`} suppressHydrationWarning>
         <AuthProvider>
           <ToastProvider>
-            <CartProvider>
-              <ClientLayout>{children}</ClientLayout>
-            </CartProvider>
+            <SettingsProvider>
+              <CartProvider>
+                <ClientLayout>{children}</ClientLayout>
+              </CartProvider>
+            </SettingsProvider>
           </ToastProvider>
         </AuthProvider>
       </body>

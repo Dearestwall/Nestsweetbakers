@@ -1,5 +1,7 @@
 // Product/Cake Interface
 export interface Cake {
+  discount: number;
+  stock: number;
   id?: string;
   name: string;
   description: string;

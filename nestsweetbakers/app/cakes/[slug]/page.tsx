@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { doc, getDoc, collection, getDocs, addDoc, serverTimestamp, setDoc, query, where } from 'firebase/firestore';
+import { doc, getDoc, collection, getDocs, addDoc, serverTimestamp, setDoc, updateDoc, increment } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -12,8 +12,26 @@ import { useAuth } from '@/context/AuthContext';
 import { 
   Star, ShoppingCart, Heart, Share2, TrendingUp, ChevronLeft,
   Copy, Facebook, Twitter, Mail, CheckCircle, Package, Clock,
-  Truck, Award, Loader2, X, Plus, Minus, MessageSquare
+  Truck, Award, Loader2, X, Plus, Minus, MessageSquare, ChevronRight,
+  Info, Zap, Gift, Tag, AlertCircle, ShieldCheck, Timer, BadgePercent,
+  ImageIcon, Sparkles, User, Calendar, MapPin, DollarSign, Flame,
+  ThumbsUp, Eye, Download, Phone, Leaf, TrendingDown, Globe,
+  CheckCheck, AlertTriangle, Box, Weight, Ruler, Cookie
 } from 'lucide-react';
+
+interface ExtendedCake extends Omit<Cake, 'discount' | 'stock'> {
+  discount?: number;
+  stock?: number;
+  featured?: boolean;
+  tags?: string[];
+  deliveryPincodes?: string[];
+  currency?: 'INR' | 'CAD';
+  seoKeywords?: string[];
+  availableFrom?: string;
+  availableTo?: string;
+  minOrder?: number;
+  maxOrder?: number;
+}
 
 interface Review {
   id?: string;
@@ -24,6 +42,13 @@ interface Review {
   comment: string;
   createdAt: string;
   approved: boolean;
+  verified?: boolean;
+}
+
+interface ToastMessage {
+  type: 'success' | 'error' | 'info' | 'warning';
+  message: string;
+  description?: string;
 }
 
 export default function CakeDetailPage() {
@@ -33,25 +58,78 @@ export default function CakeDetailPage() {
   const { addToCart } = useCart();
   const { user } = useAuth();
   
-  const [cake, setCake] = useState<Cake | null>(null);
-  const [allCakes, setAllCakes] = useState<Cake[]>([]);
+  const [cake, setCake] = useState<ExtendedCake | null>(null);
+  const [allCakes, setAllCakes] = useState<ExtendedCake[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loading, setLoading] = useState(true);
   const [quantity, setQuantity] = useState(1);
+  const [selectedWeight, setSelectedWeight] = useState<'kg' | 'lb'>('kg');
   const [customization, setCustomization] = useState('');
   const [isFavorite, setIsFavorite] = useState(false);
   const [checkingWishlist, setCheckingWishlist] = useState(true);
   const [showReviewForm, setShowReviewForm] = useState(false);
   const [showShareMenu, setShowShareMenu] = useState(false);
   const [addingToCart, setAddingToCart] = useState(false);
-  const [imageLoaded, setImageLoaded] = useState(false);
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [toast, setToast] = useState<ToastMessage | null>(null);
+  const [activeTab, setActiveTab] = useState<'details' | 'reviews' | 'delivery'>('details');
+  const [viewCount, setViewCount] = useState(0);
   const [reviewForm, setReviewForm] = useState({
     name: '',
     rating: 5,
     comment: '',
   });
 
-  // Fetch cake data
+  // Get currency symbol
+  const currencySymbol = cake?.currency === 'CAD' ? '$' : '₹';
+  const currencyName = cake?.currency === 'CAD' ? 'CAD' : 'INR';
+
+  // Calculate discount
+  const discount = cake?.discount || 0;
+  const originalPrice = cake?.basePrice || 0;
+  const discountedPrice = discount > 0 ? originalPrice * (1 - discount / 100) : originalPrice;
+  const savings = originalPrice - discountedPrice;
+
+  // Weight conversion
+  const displayWeight = selectedWeight === 'kg' ? quantity : (quantity * 2.20462).toFixed(2);
+  const weightUnit = selectedWeight === 'kg' ? 'kg' : 'lb';
+
+  // All images
+  const allImages = useMemo(() => {
+    if (!cake) return [];
+    const images = [cake.imageUrl];
+    if (cake.images && cake.images.length > 0) {
+      images.push(...cake.images);
+    }
+    return images.filter(Boolean);
+  }, [cake]);
+
+  // Check availability
+  const isAvailable = useMemo(() => {
+    if (!cake) return true;
+    const now = new Date();
+    
+    if (cake.availableFrom) {
+      const from = new Date(cake.availableFrom);
+      if (now < from) return false;
+    }
+    
+    if (cake.availableTo) {
+      const to = new Date(cake.availableTo);
+      if (now > to) return false;
+    }
+    
+    return true;
+  }, [cake]);
+
+  // Show toast notification
+  const showToast = (type: ToastMessage['type'], message: string, description?: string) => {
+    setToast({ type, message, description });
+    setTimeout(() => setToast(null), 5000);
+  };
+
+  // Fetch data
   useEffect(() => {
     async function fetchData() {
       if (!slug) return;
@@ -61,10 +139,20 @@ export default function CakeDetailPage() {
         const docSnap = await getDoc(docRef);
         
         if (docSnap.exists()) {
-          const cakeData = { id: docSnap.id, ...docSnap.data() } as Cake;
+          const cakeData = { id: docSnap.id, ...docSnap.data() } as ExtendedCake;
           setCake(cakeData);
 
-          // Fetch approved reviews
+          // Update view count
+          try {
+            await updateDoc(docRef, {
+              viewCount: increment(1)
+            });
+            setViewCount((cakeData as any).viewCount || 0);
+          } catch (err) {
+            console.error('Failed to update view count:', err);
+          }
+
+          // Fetch reviews
           const reviewsRef = collection(db, 'reviews');
           const reviewsSnap = await getDocs(reviewsRef);
           const cakeReviews = reviewsSnap.docs
@@ -74,12 +162,13 @@ export default function CakeDetailPage() {
           setReviews(cakeReviews);
         }
 
-        // Fetch all cakes for recommendations
+        // Fetch all cakes
         const allCakesSnap = await getDocs(collection(db, 'products'));
-        const cakesData = allCakesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Cake));
+        const cakesData = allCakesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as ExtendedCake));
         setAllCakes(cakesData);
       } catch (error) {
         console.error('Error fetching data:', error);
+        showToast('error', 'Failed to load cake details', 'Please try refreshing the page');
       } finally {
         setLoading(false);
       }
@@ -88,7 +177,7 @@ export default function CakeDetailPage() {
     fetchData();
   }, [slug]);
 
-  // Check wishlist status
+  // Check wishlist
   useEffect(() => {
     async function checkWishlist() {
       if (!user || !slug) {
@@ -117,8 +206,19 @@ export default function CakeDetailPage() {
     if (!cake || allCakes.length === 0) return [];
     
     return allCakes
-      .filter(c => c.id !== cake.id && (c.category === cake.category || (c.orderCount || 0) > 5))
-      .sort((a, b) => (b.orderCount || 0) - (a.orderCount || 0))
+      .filter(c => c.id !== cake.id)
+      .map(c => {
+        let score = 0;
+        if (c.category === cake.category) score += 5;
+        if ((c.orderCount || 0) > 10) score += 3;
+        const priceDiff = Math.abs((c.basePrice || 0) - (cake.basePrice || 0));
+        if (priceDiff < 200) score += 2;
+        if ((c.discount || 0) > 0) score += 1;
+        if (c.featured) score += 2;
+        
+        return { ...c, score };
+      })
+      .sort((a, b) => b.score - a.score)
       .slice(0, 4);
   }, [cake, allCakes]);
 
@@ -136,42 +236,58 @@ export default function CakeDetailPage() {
   const handleAddToCart = async () => {
     if (!cake) return;
     
+    // Check availability
+    if (!isAvailable) {
+      showToast('error', 'Product Not Available', 'This product is currently not available for purchase');
+      return;
+    }
+
+    // Check min/max order
+    if (cake.minOrder && quantity < cake.minOrder) {
+      showToast('error', `Minimum order is ${cake.minOrder} kg`, 'Please increase the quantity');
+      return;
+    }
+
+    if (cake.maxOrder && quantity > cake.maxOrder) {
+      showToast('error', `Maximum order is ${cake.maxOrder} kg`, 'Please decrease the quantity');
+      return;
+    }
+
+    // Check stock
+    if (cake.stock !== undefined && cake.stock === 0) {
+      showToast('error', 'Out of Stock', 'This item is currently out of stock');
+      return;
+    }
+
     setAddingToCart(true);
     
     try {
-      await addToCart(cake, quantity, customization);
-      
-      // Show success toast
-      const toast = document.createElement('div');
-      toast.className = 'fixed top-4 right-4 bg-green-500 text-white px-6 py-4 rounded-lg shadow-2xl z-50 animate-slide-in-right';
-      toast.innerHTML = `
-        <div class="flex items-center gap-3">
-          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-          </svg>
-          <div>
-            <p class="font-bold">Added to cart!</p>
-            <p class="text-sm">${cake.name} - ${quantity}kg</p>
-          </div>
-        </div>
-      `;
-      document.body.appendChild(toast);
-      
-      setTimeout(() => {
-        toast.classList.add('animate-fade-out');
-        setTimeout(() => document.body.removeChild(toast), 300);
-      }, 3000);
+     await addToCart(cake as Cake, quantity, customization);
 
-      // Ask to go to cart
+      // Update order count
+      try {
+        await updateDoc(doc(db, 'products', slug), {
+          orderCount: increment(1)
+        });
+      } catch (err) {
+        console.error('Failed to update order count:', err);
+      }
+
+      showToast(
+        'success', 
+        'Added to Cart! 🎉',
+        `${cake.name} - ${quantity}${weightUnit} added successfully`
+      );
+
       setTimeout(() => {
-        const proceed = confirm('Go to cart to checkout?');
+        const proceed = confirm('🛒 Go to cart to complete your order?');
         if (proceed) {
           router.push('/cart');
         }
-      }, 500);
+      }, 1000);
     } catch (error) {
       console.error('Error adding to cart:', error);
-      alert('Failed to add to cart');
+      showToast('error', 'Failed to add to cart', 'Please try again');
     } finally {
       setAddingToCart(false);
     }
@@ -179,8 +295,8 @@ export default function CakeDetailPage() {
 
   const toggleWishlist = async () => {
     if (!user) {
-      alert('Please sign in to add to wishlist');
-      router.push('/login');
+      showToast('info', 'Sign in required', 'Please sign in to add to wishlist');
+      setTimeout(() => router.push('/login'), 1500);
       return;
     }
 
@@ -192,8 +308,10 @@ export default function CakeDetailPage() {
 
       if (isFavorite) {
         wishlist = wishlist.filter((id: string) => id !== slug);
+        showToast('success', 'Removed from wishlist');
       } else {
         wishlist.push(slug);
+        showToast('success', 'Added to wishlist ❤️');
       }
 
       await setDoc(wishlistRef, { 
@@ -202,30 +320,24 @@ export default function CakeDetailPage() {
       }, { merge: true });
       
       setIsFavorite(!isFavorite);
-
-      // Show toast
-      const toast = document.createElement('div');
-      toast.className = 'fixed top-4 right-4 bg-pink-600 text-white px-6 py-3 rounded-lg shadow-2xl z-50 animate-slide-in-right';
-      toast.textContent = isFavorite ? 'Removed from wishlist' : 'Added to wishlist ❤️';
-      document.body.appendChild(toast);
-      setTimeout(() => {
-        toast.classList.add('animate-fade-out');
-        setTimeout(() => document.body.removeChild(toast), 300);
-      }, 2000);
     } catch (error) {
       console.error('Error toggling wishlist:', error);
-      alert('Failed to update wishlist');
+      showToast('error', 'Failed to update wishlist');
     }
   };
 
   const handleShare = async (platform: string) => {
     const url = window.location.href;
-    const text = `Check out this amazing ${cake?.name} cake!`;
+    const text = `Check out ${cake?.name}! ${discount > 0 ? `Get ${discount}% OFF!` : ''}`;
 
     switch (platform) {
       case 'copy':
-        navigator.clipboard.writeText(url);
-        alert('Link copied to clipboard! 📋');
+        try {
+          await navigator.clipboard.writeText(url);
+          showToast('success', 'Link copied! 📋');
+        } catch (err) {
+          showToast('error', 'Failed to copy link');
+        }
         break;
       case 'whatsapp':
         window.open(`https://wa.me/?text=${encodeURIComponent(text + ' ' + url)}`, '_blank');
@@ -248,8 +360,13 @@ export default function CakeDetailPage() {
     e.preventDefault();
     
     if (!user) {
-      alert('Please sign in to submit a review');
-      router.push('/login');
+      showToast('info', 'Sign in required', 'Please sign in to submit a review');
+      setTimeout(() => router.push('/login'), 1500);
+      return;
+    }
+
+    if (reviewForm.comment.length < 10) {
+      showToast('error', 'Review too short', 'Please write at least 10 characters');
       return;
     }
 
@@ -262,24 +379,27 @@ export default function CakeDetailPage() {
         comment: reviewForm.comment,
         createdAt: new Date().toISOString(),
         approved: false,
+        verified: true,
       });
 
-      // Show success
-      alert('✓ Review submitted! It will appear after admin approval.');
+      showToast('success', 'Review submitted! ✓', 'Your review will appear after approval');
       setShowReviewForm(false);
       setReviewForm({ name: '', rating: 5, comment: '' });
     } catch (error) {
       console.error('Error submitting review:', error);
-      alert('Failed to submit review');
+      showToast('error', 'Failed to submit review');
     }
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-pink-50 to-purple-50">
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50">
         <div className="text-center">
-          <Loader2 className="animate-spin h-16 w-16 text-pink-600 mx-auto mb-4" />
-          <p className="text-gray-600 font-medium">Loading delicious cake...</p>
+          <div className="relative w-24 h-24 mx-auto mb-6">
+            <div className="absolute inset-0 border-4 border-pink-200 rounded-full animate-ping"></div>
+            <div className="relative w-24 h-24 border-4 border-pink-600 border-t-transparent rounded-full animate-spin"></div>
+          </div>
+          <p className="text-gray-600 font-semibold text-lg animate-pulse">Loading delicious cake...</p>
         </div>
       </div>
     );
@@ -287,484 +407,1043 @@ export default function CakeDetailPage() {
 
   if (!cake) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-pink-50 to-purple-50">
-        <div className="text-center">
+      <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50 p-4">
+        <div className="text-center bg-white p-8 md:p-12 rounded-2xl shadow-2xl max-w-md">
           <div className="text-6xl mb-4">🎂</div>
-          <h1 className="text-2xl font-bold text-red-600 mb-4">Cake not found</h1>
+          <h1 className="text-2xl md:text-3xl font-bold text-gray-800 mb-2">Cake Not Found</h1>
+          <p className="text-gray-600 mb-6">The cake you&apos;re looking for doesn&apos;t exist</p>
           <Link 
             href="/cakes" 
-            className="inline-flex items-center gap-2 bg-pink-600 text-white px-6 py-3 rounded-full hover:bg-pink-700 transition font-semibold"
+            className="inline-flex items-center gap-2 bg-gradient-to-r from-pink-600 to-purple-600 text-white px-6 md:px-8 py-3 md:py-4 rounded-full hover:from-pink-700 hover:to-purple-700 transition font-semibold shadow-lg"
           >
             <ChevronLeft size={20} />
-            Back to all cakes
+            Browse All Cakes
           </Link>
         </div>
       </div>
     );
   }
 
-  const imageUrl = cake.imageUrl && cake.imageUrl.trim() !== '' 
-    ? cake.imageUrl 
-    : 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=800';
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-50 to-purple-50 py-8">
+    <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-blue-50 py-4 md:py-8">
+      {/* Toast Notification */}
+      {toast && (
+        <div className={`fixed top-4 right-4 left-4 md:left-auto z-50 animate-slide-in-right max-w-md ${ 
+          toast.type === 'success' ? 'bg-green-500' :
+          toast.type === 'error' ? 'bg-red-500' :
+          toast.type === 'warning' ? 'bg-orange-500' :
+          'bg-blue-500'
+        } text-white rounded-xl shadow-2xl overflow-hidden`}>
+          <div className="p-4 flex items-start gap-3">
+            <div className="flex-shrink-0">
+              {toast.type === 'success' && <CheckCircle size={24} />}
+              {toast.type === 'error' && <AlertCircle size={24} />}
+              {toast.type === 'warning' && <AlertTriangle size={24} />}
+              {toast.type === 'info' && <Info size={24} />}
+            </div>
+            <div className="flex-1">
+              <p className="font-bold text-base md:text-lg">{toast.message}</p>
+              {toast.description && <p className="text-sm opacity-90 mt-1">{toast.description}</p>}
+            </div>
+            <button onClick={() => setToast(null)} className="flex-shrink-0">
+              <X size={20} />
+            </button>
+          </div>
+          <div className="h-1 bg-white/30">
+            <div className="h-full bg-white animate-progress"></div>
+          </div>
+        </div>
+      )}
+
+      {/* Image Modal */}
+      {showImageModal && (
+        <div className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center p-4" onClick={() => setShowImageModal(false)}>
+          <button 
+            onClick={() => setShowImageModal(false)}
+            className="absolute top-4 right-4 p-2 bg-white/20 backdrop-blur-sm text-white rounded-full hover:bg-white/30 transition z-10"
+          >
+            <X size={24} />
+          </button>
+          <div className="relative w-full max-w-6xl h-[70vh] md:h-[80vh]">
+            <Image
+              src={allImages[selectedImageIndex] || ''}
+              alt={cake.name}
+              fill
+              className="object-contain"
+              sizes="100vw"
+            />
+          </div>
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2 flex-wrap justify-center px-4">
+            {allImages.map((_, index) => (
+              <button
+                key={index}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedImageIndex(index);
+                }}
+                className={`w-3 h-3 rounded-full transition ${
+                  index === selectedImageIndex ? 'bg-white w-8' : 'bg-white/50'
+                }`}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="container mx-auto px-4">
-        {/* Back Button */}
+        {/* Breadcrumb - Hidden on mobile */}
+        <div className="hidden md:flex items-center gap-2 text-sm mb-6 animate-fade-in">
+          <Link href="/" className="text-gray-600 hover:text-pink-600 transition">Home</Link>
+          <ChevronRight size={16} className="text-gray-400" />
+          <Link href="/cakes" className="text-gray-600 hover:text-pink-600 transition">Cakes</Link>
+          <ChevronRight size={16} className="text-gray-400" />
+          <Link href={`/cakes?category=${cake.category}`} className="text-gray-600 hover:text-pink-600 transition">
+            {cake.category}
+          </Link>
+          <ChevronRight size={16} className="text-gray-400" />
+          <span className="text-pink-600 font-semibold truncate max-w-[200px]">{cake.name}</span>
+        </div>
+
+        {/* Mobile Back Button */}
         <Link
           href="/cakes"
-          className="inline-flex items-center gap-2 text-pink-600 hover:text-pink-700 mb-6 font-semibold group transition-all"
+          className="inline-flex items-center gap-2 text-pink-600 hover:text-pink-700 mb-4 md:mb-6 font-semibold group transition-all"
         >
           <ChevronLeft className="group-hover:-translate-x-1 transition-transform" size={20} />
-          Back to Cakes
+          <span className="md:inline">Back</span>
         </Link>
 
-        {/* Main Product Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 md:gap-12 bg-white rounded-2xl shadow-2xl overflow-hidden mb-12 animate-fade-in">
+        {/* Main Product Section - Responsive Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8 lg:gap-12 bg-white rounded-xl md:rounded-2xl shadow-2xl overflow-hidden mb-8 md:mb-12 animate-fade-in">
           {/* Image Gallery */}
-          <div className="relative group">
-            <div className="relative h-96 md:h-[600px] bg-gray-100">
-              {!imageLoaded && (
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <Loader2 className="animate-spin h-12 w-12 text-pink-600" />
-                </div>
-              )}
+          <div className="relative">
+            {/* Main Image */}
+            <div 
+              className="relative h-64 sm:h-80 md:h-96 lg:h-[600px] bg-gradient-to-br from-pink-50 to-purple-50 cursor-zoom-in group"
+              onClick={() => setShowImageModal(true)}
+            >
               <Image
-                src={imageUrl}
+                src={allImages[selectedImageIndex] || 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=800'}
                 alt={cake.name}
                 fill
-                className={`object-cover group-hover:scale-105 transition-transform duration-700 ${
-                  imageLoaded ? 'opacity-100' : 'opacity-0'
-                }`}
+                className="object-cover group-hover:scale-105 transition-transform duration-700"
                 priority
                 sizes="(max-width: 1024px) 100vw, 50vw"
-                onLoad={() => setImageLoaded(true)}
               />
               
-              {/* Badges */}
-              <div className="absolute top-4 left-4 flex flex-col gap-2 animate-slide-in-left">
-                <span className="bg-pink-600 text-white px-4 py-2 rounded-full text-sm font-bold shadow-lg backdrop-blur-sm">
-                  {cake.category}
-                </span>
-                {cake.orderCount && cake.orderCount > 10 && (
-                  <span className="bg-yellow-400 text-gray-900 px-4 py-2 rounded-full text-sm font-bold shadow-lg flex items-center gap-1">
-                    <Star size={16} className="fill-current" />
-                    Bestseller
+              {/* Zoom Hint */}
+              <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">
+                <div className="bg-white px-4 py-2 rounded-full text-xs md:text-sm font-semibold flex items-center gap-2">
+                  <Zap size={16} />
+                  Click to zoom
+                </div>
+              </div>
+
+              {/* Badges - Responsive */}
+              <div className="absolute top-2 md:top-4 left-2 md:left-4 flex flex-col gap-1.5 md:gap-2 animate-slide-in-left">
+                {!isAvailable && (
+                  <span className="bg-red-600 text-white px-2 md:px-4 py-1 md:py-2 rounded-full text-xs md:text-sm font-bold shadow-lg backdrop-blur-sm flex items-center gap-1">
+                    <AlertTriangle size={14} />
+                    Not Available
                   </span>
                 )}
-                {reviews.length > 5 && (
-                  <span className="bg-green-500 text-white px-4 py-2 rounded-full text-sm font-bold shadow-lg flex items-center gap-1">
-                    <Award size={16} />
-                    Popular
+                
+                {discount > 0 && (
+                  <span className="bg-gradient-to-r from-red-600 to-orange-500 text-white px-2 md:px-4 py-1 md:py-2 rounded-full text-xs md:text-sm font-bold shadow-lg backdrop-blur-sm flex items-center gap-1 animate-pulse">
+                    <BadgePercent size={14} />
+                    {discount}% OFF
+                  </span>
+                )}
+
+                {cake.featured && (
+                  <span className="bg-gradient-to-r from-yellow-400 to-orange-400 text-gray-900 px-2 md:px-4 py-1 md:py-2 rounded-full text-xs md:text-sm font-bold shadow-lg flex items-center gap-1">
+                    <Star size={14} className="fill-current" />
+                    Featured
+                  </span>
+                )}
+
+                <span className="bg-pink-600/90 backdrop-blur-sm text-white px-2 md:px-4 py-1 md:py-2 rounded-full text-xs md:text-sm font-bold shadow-lg">
+                  {cake.category}
+                </span>
+
+                {cake.orderCount && cake.orderCount > 20 && (
+                  <span className="bg-purple-600 text-white px-2 md:px-4 py-1 md:py-2 rounded-full text-xs md:text-sm font-bold shadow-lg flex items-center gap-1">
+                    <Flame size={14} />
+                    Trending
+                  </span>
+                )}
+
+                {allImages.length > 1 && (
+                  <span className="bg-blue-600 text-white px-2 md:px-4 py-1 md:py-2 rounded-full text-xs md:text-sm font-bold shadow-lg flex items-center gap-1">
+                    <ImageIcon size={14} />
+                    {allImages.length} Photos
+                  </span>
+                )}
+
+                {/* Currency Badge */}
+                <span className="bg-green-600 text-white px-2 md:px-4 py-1 md:py-2 rounded-full text-xs md:text-sm font-bold shadow-lg flex items-center gap-1">
+                  <Globe size={14} />
+                  {currencyName}
+                </span>
+              </div>
+
+              {/* Stock Status - Top Right */}
+              <div className="absolute top-2 md:top-4 right-2 md:right-4 flex flex-col gap-1.5 md:gap-2">
+                {cake.stock !== undefined && (
+                  <span className={`px-2 md:px-3 py-1 md:py-1.5 rounded-full text-xs font-bold shadow-lg backdrop-blur-sm ${
+                    cake.stock > 10 ? 'bg-green-500 text-white' :
+                    cake.stock > 0 ? 'bg-orange-500 text-white animate-pulse' :
+                    'bg-red-600 text-white'
+                  }`}>
+                    {cake.stock > 0 ? `${cake.stock} in stock` : 'Out of stock'}
                   </span>
                 )}
               </div>
 
-              {/* Action Buttons */}
-              <div className="absolute top-4 right-4 flex flex-col gap-2 animate-slide-in-right">
+              {/* Action Buttons - Responsive */}
+              <div className="absolute bottom-2 md:bottom-4 right-2 md:right-4 flex gap-2 animate-slide-in-right">
                 <button
-                  onClick={toggleWishlist}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleWishlist();
+                  }}
                   disabled={checkingWishlist}
-                  className={`p-3 rounded-full shadow-lg transition-all transform hover:scale-110 ${
-                    isFavorite ? 'bg-pink-600 text-white' : 'bg-white text-gray-600 hover:bg-pink-100'
+                  className={`p-2 md:p-3 rounded-full shadow-lg transition-all transform hover:scale-110 ${
+                    isFavorite ? 'bg-pink-600 text-white' : 'bg-white/95 backdrop-blur-sm text-gray-600 hover:bg-pink-100'
                   } ${checkingWishlist ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  title={isFavorite ? 'Remove from wishlist' : 'Add to wishlist'}
                 >
-                  <Heart className={isFavorite ? 'fill-current' : ''} size={20} />
+                  <Heart className={isFavorite ? 'fill-current' : ''} size={18} />
                 </button>
                 
                 <div className="relative">
                   <button 
-                    onClick={() => setShowShareMenu(!showShareMenu)}
-                    className="p-3 bg-white text-gray-600 rounded-full shadow-lg hover:bg-pink-100 transition-all transform hover:scale-110"
-                    title="Share"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowShareMenu(!showShareMenu);
+                    }}
+                    className="p-2 md:p-3 bg-white/95 backdrop-blur-sm text-gray-600 rounded-full shadow-lg hover:bg-pink-100 transition-all transform hover:scale-110"
                   >
-                    <Share2 size={20} />
+                    <Share2 size={18} />
                   </button>
 
-                  {/* Share Menu */}
+                  {/* Share Menu - Responsive */}
                   {showShareMenu && (
-                    <div className="absolute top-14 right-0 bg-white rounded-lg shadow-2xl p-2 z-10 min-w-[200px] animate-scale-in">
-                      <button
-                        onClick={() => handleShare('copy')}
-                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-100 rounded-lg transition-colors text-left"
-                      >
-                        <Copy size={18} />
+                    <div className="absolute top-12 right-0 bg-white rounded-xl shadow-2xl p-2 z-20 min-w-[180px] md:min-w-[200px] animate-scale-in">
+                      <button onClick={() => handleShare('copy')} className="w-full flex items-center gap-3 px-3 md:px-4 py-2 md:py-3 hover:bg-gray-100 rounded-lg transition text-left">
+                        <Copy size={16} />
                         <span className="text-sm font-medium">Copy Link</span>
                       </button>
-                      <button
-                        onClick={() => handleShare('whatsapp')}
-                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-100 rounded-lg transition-colors text-left"
-                      >
+                      <button onClick={() => handleShare('whatsapp')} className="w-full flex items-center gap-3 px-3 md:px-4 py-2 md:py-3 hover:bg-gray-100 rounded-lg transition text-left">
                         <span className="text-lg">💬</span>
                         <span className="text-sm font-medium">WhatsApp</span>
                       </button>
-                      <button
-                        onClick={() => handleShare('facebook')}
-                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-100 rounded-lg transition-colors text-left"
-                      >
-                        <Facebook size={18} />
+                      <button onClick={() => handleShare('facebook')} className="w-full flex items-center gap-3 px-3 md:px-4 py-2 md:py-3 hover:bg-gray-100 rounded-lg transition text-left">
+                        <Facebook size={16} />
                         <span className="text-sm font-medium">Facebook</span>
                       </button>
-                      <button
-                        onClick={() => handleShare('twitter')}
-                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-100 rounded-lg transition-colors text-left"
-                      >
-                        <Twitter size={18} />
+                      <button onClick={() => handleShare('twitter')} className="w-full flex items-center gap-3 px-3 md:px-4 py-2 md:py-3 hover:bg-gray-100 rounded-lg transition text-left">
+                        <Twitter size={16} />
                         <span className="text-sm font-medium">Twitter</span>
-                      </button>
-                      <button
-                        onClick={() => handleShare('email')}
-                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-100 rounded-lg transition-colors text-left"
-                      >
-                        <Mail size={18} />
-                        <span className="text-sm font-medium">Email</span>
                       </button>
                     </div>
                   )}
                 </div>
               </div>
             </div>
+
+            {/* Thumbnail Images - Responsive */}
+            {allImages.length > 1 && (
+              <div className="p-2 md:p-4 flex gap-2 overflow-x-auto scrollbar-hide">
+                {allImages.map((img, index) => (
+                  <button
+                    key={index}
+                    onClick={() => setSelectedImageIndex(index)}
+                    className={`relative w-16 h-16 md:w-20 md:h-20 flex-shrink-0 rounded-lg overflow-hidden transition-all ${
+                      index === selectedImageIndex 
+                        ? 'ring-4 ring-pink-600 scale-110' 
+                        : 'ring-2 ring-gray-200 hover:ring-pink-400'
+                    }`}
+                  >
+                    <Image
+                      src={img}
+                      alt={`${cake.name} - Image ${index + 1}`}
+                      fill
+                      className="object-cover"
+                      sizes="80px"
+                    />
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           
-          {/* Product Details */}
-          <div className="p-6 md:p-10">
-            <h1 className="text-3xl md:text-4xl font-bold mb-4 animate-fade-in">{cake.name}</h1>
-            
-            {/* Rating */}
-            <div className="flex items-center gap-4 mb-6 animate-fade-in" style={{ animationDelay: '100ms' }}>
+          {/* Product Details - Responsive Padding */}
+          <div className="p-4 md:p-6 lg:p-10">
+            {/* Title and Stats */}
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
+              <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold leading-tight">{cake.name}</h1>
+              <div className="flex items-center gap-2 flex-wrap">
+                {viewCount > 0 && (
+                  <span className="flex items-center gap-1 text-xs md:text-sm text-gray-600 bg-gray-100 px-2 md:px-3 py-1 rounded-full">
+                    <Eye size={14} />
+                    {viewCount} views
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Rating - Responsive */}
+            <div className="flex flex-wrap items-center gap-3 md:gap-4 mb-4 md:mb-6 p-3 bg-yellow-50 rounded-lg border border-yellow-200">
               <div className="flex items-center gap-1">
                 {[...Array(5)].map((_, i) => (
                   <Star
                     key={i}
-                    size={20}
-                    className={`transition-all ${i < Math.round(averageRating) ? 'fill-yellow-400 text-yellow-400 scale-110' : 'text-gray-300'}`}
+                    size={18}
+                    className={i < Math.round(averageRating) ? 'fill-yellow-400 text-yellow-400' : 'text-gray-300'}
                   />
                 ))}
               </div>
-              <span className="text-gray-600 font-medium">
-                {averageRating.toFixed(1)} ({reviews.length} reviews)
+              <span className="text-sm md:text-base font-bold text-yellow-700">
+                {averageRating.toFixed(1)}
               </span>
+              <span className="text-xs md:text-sm text-gray-600">
+                ({reviews.length} {reviews.length === 1 ? 'review' : 'reviews'})
+              </span>
+              {cake.orderCount && cake.orderCount > 0 && (
+                <>
+                  <span className="text-gray-300">|</span>
+                  <span className="text-xs md:text-sm text-gray-600 font-medium flex items-center gap-1">
+                    <TrendingUp size={14} className="text-green-600" />
+                    {cake.orderCount} orders
+                  </span>
+                </>
+              )}
             </div>
 
-            <p className="text-gray-600 mb-6 leading-relaxed animate-fade-in" style={{ animationDelay: '200ms' }}>
+            {/* Description - Responsive */}
+            <p className="text-gray-600 mb-4 md:mb-6 leading-relaxed text-sm md:text-base lg:text-lg">
               {cake.description}
             </p>
-            
-            {/* Price */}
-            <div className="mb-8 p-6 bg-gradient-to-r from-pink-50 to-purple-50 rounded-xl animate-fade-in" style={{ animationDelay: '300ms' }}>
-              <div className="flex items-baseline gap-2 mb-2">
-                <span className="text-4xl font-bold text-pink-600">₹{cake.basePrice}</span>
-                <span className="text-gray-500">per kg</span>
+
+            {/* Tags - Responsive */}
+            {cake.tags && cake.tags.length > 0 && (
+              <div className="mb-4 md:mb-6">
+                <div className="flex flex-wrap gap-2">
+                  {cake.tags.map((tag, idx) => (
+                    <span
+                      key={idx}
+                      className="px-2 md:px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs md:text-sm font-semibold flex items-center gap-1"
+                    >
+                      <Tag size={12} />
+                      {tag}
+                    </span>
+                  ))}
+                </div>
               </div>
-              <div className="flex items-center gap-4 text-sm text-gray-600">
+            )}
+
+            {/* Price Section - Responsive */}
+            <div className="mb-6 md:mb-8 p-4 md:p-6 bg-gradient-to-r from-pink-50 to-purple-50 rounded-xl border-2 border-pink-200 animate-fade-in">
+              {discount > 0 ? (
+                <>
+                  <div className="flex flex-wrap items-center gap-2 md:gap-4 mb-2">
+                    <span className="text-3xl md:text-4xl font-black text-pink-600">
+                      {currencySymbol}{discountedPrice.toFixed(2)}
+                    </span>
+                    <span className="text-xl md:text-2xl text-gray-400 line-through font-semibold">
+                      {currencySymbol}{originalPrice}
+                    </span>
+                    <span className="bg-red-600 text-white px-2 md:px-3 py-1 rounded-full text-xs md:text-sm font-bold">
+                      Save {currencySymbol}{savings.toFixed(2)}
+                    </span>
+                  </div>
+                  <p className="text-xs md:text-sm text-gray-600 flex items-center gap-2">
+                    <BadgePercent size={14} className="text-red-600" />
+                    {discount}% discount applied • per kg • {currencyName}
+                  </p>
+                </>
+              ) : (
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-3xl md:text-4xl font-black text-pink-600">
+                    {currencySymbol}{originalPrice}
+                  </span>
+                  <span className="text-gray-500 text-sm md:text-base">per kg ({currencyName})</span>
+                </div>
+              )}
+
+              {/* Min/Max Order Info */}
+              {(cake.minOrder || cake.maxOrder) && (
+                <div className="flex flex-wrap items-center gap-3 md:gap-4 text-xs md:text-sm text-gray-600 mt-3 pt-3 border-t border-pink-200">
+                  {cake.minOrder && (
+                    <span className="flex items-center gap-1">
+                      <Weight size={14} className="text-blue-600" />
+                      Min: {cake.minOrder} kg
+                    </span>
+                  )}
+                  {cake.maxOrder && (
+                    <span className="flex items-center gap-1">
+                      <Ruler size={14} className="text-purple-600" />
+                      Max: {cake.maxOrder} kg
+                    </span>
+                  )}
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center gap-3 md:gap-4 text-xs md:text-sm text-gray-600 mt-3 pt-3 border-t border-pink-200">
                 <span className="flex items-center gap-1">
-                  <CheckCircle size={16} className="text-green-600" />
-                  Min 0.5 kg
+                  <CheckCircle size={14} className="text-green-600" />
+                  Fresh daily
                 </span>
                 <span className="flex items-center gap-1">
-                  <Package size={16} className="text-blue-600" />
-                  Fresh ingredients
+                  <Package size={14} className="text-blue-600" />
+                  Premium quality
+                </span>
+                <span className="flex items-center gap-1">
+                  <ShieldCheck size={14} className="text-purple-600" />
+                  Guaranteed
                 </span>
               </div>
             </div>
 
-            {/* Quantity */}
-            <div className="mb-6 animate-fade-in" style={{ animationDelay: '400ms' }}>
-              <label className="block text-sm font-semibold mb-3">Quantity (kg)</label>
-              <div className="flex items-center gap-4">
+            {/* Availability Dates */}
+            {(cake.availableFrom || cake.availableTo) && (
+              <div className="mb-6 p-4 bg-blue-50 rounded-xl border border-blue-200">
+                <p className="text-sm font-semibold text-blue-900 mb-2 flex items-center gap-2">
+                  <Calendar size={16} />
+                  Availability Period
+                </p>
+                <div className="space-y-1 text-xs md:text-sm text-blue-800">
+                  {cake.availableFrom && (
+                    <p>From: {new Date(cake.availableFrom).toLocaleDateString()}</p>
+                  )}
+                  {cake.availableTo && (
+                    <p>Until: {new Date(cake.availableTo).toLocaleDateString()}</p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Weight Unit Toggle - Responsive */}
+            <div className="mb-4 md:mb-6 animate-fade-in">
+              <label className="block text-sm font-semibold mb-3">Weight Unit</label>
+              <div className="flex gap-2">
                 <button
-                  onClick={() => setQuantity(Math.max(0.5, quantity - 0.5))}
-                  disabled={quantity <= 0.5}
-                  className="w-12 h-12 bg-gray-200 rounded-lg hover:bg-gray-300 transition font-bold text-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                  onClick={() => setSelectedWeight('kg')}
+                  className={`flex-1 px-4 md:px-6 py-2 md:py-2.5 rounded-lg font-semibold text-sm md:text-base transition ${
+                    selectedWeight === 'kg'
+                      ? 'bg-pink-600 text-white shadow-lg'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
                 >
-                  <Minus size={20} />
+                  Kilograms (kg)
                 </button>
-                <span className="text-2xl font-bold w-20 text-center bg-pink-50 py-2 rounded-lg">{quantity}</span>
                 <button
-                  onClick={() => setQuantity(quantity + 0.5)}
-                  className="w-12 h-12 bg-gray-200 rounded-lg hover:bg-gray-300 transition font-bold text-lg flex items-center justify-center"
+                  onClick={() => setSelectedWeight('lb')}
+                  className={`flex-1 px-4 md:px-6 py-2 md:py-2.5 rounded-lg font-semibold text-sm md:text-base transition ${
+                    selectedWeight === 'lb'
+                      ? 'bg-pink-600 text-white shadow-lg'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
                 >
-                  <Plus size={20} />
+                  Pounds (lb)
                 </button>
               </div>
-              <p className="text-sm text-gray-500 mt-2">
-                Total: ₹{(cake.basePrice * quantity).toFixed(2)}
-              </p>
             </div>
 
-            {/* Customization */}
-            <div className="mb-8 animate-fade-in" style={{ animationDelay: '500ms' }}>
-              <label className="block text-sm font-semibold mb-2">
+            {/* Quantity Selector - Responsive */}
+            <div className="mb-4 md:mb-6 animate-fade-in">
+              <label className="block text-sm font-semibold mb-3">
+                Quantity ({weightUnit})
+              </label>
+              <div className="flex items-center gap-3 md:gap-4">
+                <button
+                  onClick={() => setQuantity(Math.max(cake.minOrder || 0.5, quantity - 0.5))}
+                  disabled={quantity <= (cake.minOrder || 0.5)}
+                  className="w-10 h-10 md:w-12 md:h-12 bg-gradient-to-r from-pink-600 to-purple-600 text-white rounded-lg hover:from-pink-700 hover:to-purple-700 transition font-bold text-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center shadow-lg"
+                >
+                  <Minus size={18} />
+                </button>
+                <div className="flex-1 text-center">
+                  <span className="text-2xl md:text-3xl font-bold block bg-pink-50 px-4 md:px-6 py-2 rounded-lg border-2 border-pink-200">
+                    {displayWeight}
+                  </span>
+                  <span className="text-xs text-gray-500 mt-1 block">{weightUnit}</span>
+                </div>
+                <button
+                  onClick={() => setQuantity(cake.maxOrder ? Math.min(cake.maxOrder, quantity + 0.5) : quantity + 0.5)}
+                  disabled={cake.maxOrder ? quantity >= cake.maxOrder : false}
+                  className="w-10 h-10 md:w-12 md:h-12 bg-gradient-to-r from-pink-600 to-purple-600 text-white rounded-lg hover:from-pink-700 hover:to-purple-700 transition font-bold text-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center shadow-lg"
+                >
+                  <Plus size={18} />
+                </button>
+              </div>
+              <div className="mt-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                <p className="text-sm font-semibold text-blue-800 flex flex-wrap items-center gap-2">
+                  <Tag size={16} />
+                  Total: {currencySymbol}{(discountedPrice * quantity).toFixed(2)}
+                  {discount > 0 && (
+                    <span className="text-xs text-green-700">
+                      (Save {currencySymbol}{(savings * quantity).toFixed(2)})
+                    </span>
+                  )}
+                </p>
+              </div>
+            </div>
+
+            {/* Customization - Responsive */}
+            <div className="mb-6 md:mb-8 animate-fade-in">
+              <label className="block text-sm font-semibold mb-2 flex items-center gap-2">
+                <Sparkles size={16} className="text-pink-600" />
                 Special Instructions (Optional)
               </label>
               <textarea
                 value={customization}
                 onChange={(e) => setCustomization(e.target.value)}
                 placeholder="E.g., 'Happy Birthday John', flavor preferences, dietary requirements..."
-                className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-pink-500 focus:outline-none transition resize-none"
+                className="w-full px-3 md:px-4 py-2 md:py-3 border-2 border-gray-200 rounded-lg focus:border-pink-500 focus:outline-none transition resize-none text-sm md:text-base"
                 rows={3}
+                maxLength={500}
               />
+              <p className="text-xs text-gray-500 mt-1">{customization.length}/500 characters</p>
             </div>
-            
-            {/* Add to Cart Button */}
+
+            {/* Add to Cart Button - Responsive */}
             <button
               onClick={handleAddToCart}
-              disabled={addingToCart}
-              className="w-full bg-gradient-to-r from-pink-600 to-purple-600 text-white py-4 px-6 rounded-xl hover:from-pink-700 hover:to-purple-700 transition-all font-bold text-lg mb-4 flex items-center justify-center gap-2 shadow-lg hover:shadow-2xl transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none animate-fade-in"
-              style={{ animationDelay: '600ms' }}
+              disabled={addingToCart || (cake.stock !== undefined && cake.stock === 0) || !isAvailable}
+              className="w-full bg-gradient-to-r from-pink-600 to-purple-600 text-white py-3 md:py-4 px-4 md:px-6 rounded-xl hover:from-pink-700 hover:to-purple-700 transition-all font-bold text-sm md:text-lg mb-3 md:mb-4 flex items-center justify-center gap-2 shadow-lg hover:shadow-2xl transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
             >
               {addingToCart ? (
                 <>
-                  <Loader2 className="animate-spin" size={24} />
+                  <Loader2 className="animate-spin" size={20} />
                   Adding...
+                </>
+              ) : cake.stock !== undefined && cake.stock === 0 ? (
+                <>
+                  <AlertCircle size={20} />
+                  Out of Stock
+                </>
+              ) : !isAvailable ? (
+                <>
+                  <AlertTriangle size={20} />
+                  Not Available
                 </>
               ) : (
                 <>
-                  <ShoppingCart size={24} />
-                  Add to Cart - ₹{(cake.basePrice * quantity).toFixed(2)}
+                  <ShoppingCart size={20} />
+                  Add to Cart - {currencySymbol}{(discountedPrice * quantity).toFixed(2)}
                 </>
               )}
             </button>
 
+            {/* Custom Cake Link */}
             <Link
               href="/custom-cakes"
-              className="block w-full text-center bg-white text-pink-600 border-2 border-pink-600 py-4 px-6 rounded-xl hover:bg-pink-50 transition-all font-bold text-lg animate-fade-in"
-              style={{ animationDelay: '700ms' }}
+              className="block w-full text-center bg-white text-pink-600 border-2 border-pink-600 py-3 md:py-4 px-4 md:px-6 rounded-xl hover:bg-pink-50 transition-all font-bold text-sm md:text-lg mb-4 flex items-center justify-center gap-2"
             >
-              Want Custom Design? Click Here
+              <Gift size={20} />
+              Want Custom Design?
             </Link>
 
-            {/* Trust Badges */}
-            <div className="grid grid-cols-3 gap-4 mt-6 pt-6 border-t animate-fade-in" style={{ animationDelay: '800ms' }}>
-              <div className="text-center">
-                <CheckCircle className="mx-auto mb-2 text-green-600" size={24} />
+            {/* Trust Badges - Responsive Grid */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3 pt-4 md:pt-6 border-t">
+              <div className="text-center p-2">
+                <CheckCircle className="mx-auto mb-1 md:mb-2 text-green-600" size={20} />
                 <p className="text-xs font-semibold text-gray-700">Fresh Daily</p>
               </div>
-              <div className="text-center">
-                <Truck className="mx-auto mb-2 text-blue-600" size={24} />
+              <div className="text-center p-2">
+                <Truck className="mx-auto mb-1 md:mb-2 text-blue-600" size={20} />
                 <p className="text-xs font-semibold text-gray-700">Safe Delivery</p>
               </div>
-              <div className="text-center">
-                <Clock className="mx-auto mb-2 text-purple-600" size={24} />
+              <div className="text-center p-2">
+                <Timer className="mx-auto mb-1 md:mb-2 text-purple-600" size={20} />
                 <p className="text-xs font-semibold text-gray-700">On-Time</p>
               </div>
+              <div className="text-center p-2">
+                <ShieldCheck className="mx-auto mb-1 md:mb-2 text-pink-600" size={20} />
+                <p className="text-xs font-semibold text-gray-700">Guaranteed</p>
+              </div>
             </div>
+
+            {/* Delivery Pincodes Info */}
+            {cake.deliveryPincodes && cake.deliveryPincodes.length > 0 && (
+              <div className="mt-4 p-4 bg-cyan-50 rounded-xl border border-cyan-200">
+                <p className="text-sm font-semibold text-cyan-900 mb-2 flex items-center gap-2">
+                  <MapPin size={16} />
+                  Delivery Available In
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {cake.deliveryPincodes.slice(0, 5).map((pincode, idx) => (
+                    <span key={idx} className="px-2 py-1 bg-cyan-100 text-cyan-800 rounded-md text-xs font-semibold">
+                      {pincode}
+                    </span>
+                  ))}
+                  {cake.deliveryPincodes.length > 5 && (
+                    <span className="px-2 py-1 bg-cyan-200 text-cyan-900 rounded-md text-xs font-bold">
+                      +{cake.deliveryPincodes.length - 5} more
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Reviews Section */}
-        <div className="bg-white rounded-2xl shadow-2xl p-6 md:p-10 mb-12 animate-fade-in">
-          <div className="flex items-center justify-between mb-8">
-            <div>
-              <h2 className="text-2xl md:text-3xl font-bold flex items-center gap-2">
-                <MessageSquare className="text-pink-600" size={32} />
-                Customer Reviews
-              </h2>
-              <p className="text-gray-600 mt-1">{reviews.length} verified reviews</p>
-            </div>
+        {/* Tabs Section - Responsive */}
+        <div className="bg-white rounded-xl md:rounded-2xl shadow-2xl p-4 md:p-6 lg:p-10 mb-8 md:mb-12 animate-fade-in">
+          {/* Tab Navigation - Scrollable on mobile */}
+          <div className="flex gap-2 md:gap-4 mb-6 md:mb-8 border-b overflow-x-auto scrollbar-hide">
             <button
-              onClick={() => setShowReviewForm(!showReviewForm)}
-              className="bg-pink-600 text-white px-6 py-3 rounded-lg hover:bg-pink-700 transition font-semibold flex items-center gap-2"
+              onClick={() => setActiveTab('details')}
+              className={`pb-3 md:pb-4 px-3 md:px-6 font-bold text-sm md:text-base whitespace-nowrap transition ${
+                activeTab === 'details'
+                  ? 'border-b-4 border-pink-600 text-pink-600'
+                  : 'text-gray-600 hover:text-pink-600'
+              }`}
             >
-              <Plus size={20} />
-              <span className="hidden sm:inline">Write Review</span>
+              <Info size={18} className="inline mr-2" />
+              Details
+            </button>
+            <button
+              onClick={() => setActiveTab('reviews')}
+              className={`pb-3 md:pb-4 px-3 md:px-6 font-bold text-sm md:text-base whitespace-nowrap transition ${
+                activeTab === 'reviews'
+                  ? 'border-b-4 border-pink-600 text-pink-600'
+                  : 'text-gray-600 hover:text-pink-600'
+              }`}
+            >
+              <MessageSquare size={18} className="inline mr-2" />
+              Reviews ({reviews.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('delivery')}
+              className={`pb-3 md:pb-4 px-3 md:px-6 font-bold text-sm md:text-base whitespace-nowrap transition ${
+                activeTab === 'delivery'
+                  ? 'border-b-4 border-pink-600 text-pink-600'
+                  : 'text-gray-600 hover:text-pink-600'
+              }`}
+            >
+              <Truck size={18} className="inline mr-2" />
+              Delivery
             </button>
           </div>
 
-          {/* Rating Summary */}
-          {reviews.length > 0 && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8 p-6 bg-gray-50 rounded-xl">
-              <div className="text-center">
-                <div className="text-6xl font-bold text-pink-600 mb-2">{averageRating.toFixed(1)}</div>
-                <div className="flex items-center justify-center gap-1 mb-2">
-                  {[...Array(5)].map((_, i) => (
-                    <Star
-                      key={i}
-                      size={24}
-                      className={i < Math.round(averageRating) ? 'fill-yellow-400 text-yellow-400' : 'text-gray-300'}
-                    />
-                  ))}
+          {/* Tab Content */}
+          {activeTab === 'details' && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 animate-fade-in">
+              <div className="bg-green-50 rounded-xl p-4 md:p-6 border border-green-200">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="p-2 md:p-3 bg-green-100 rounded-lg">
+                    <Cookie className="text-green-600" size={20} />
+                  </div>
+                  <h3 className="font-bold text-base md:text-lg">Ingredients</h3>
                 </div>
-                <p className="text-gray-600">{reviews.length} total reviews</p>
+                <ul className="space-y-2 text-xs md:text-sm text-gray-600">
+                  <li className="flex items-center gap-2">
+                    <CheckCircle size={14} className="text-green-600 flex-shrink-0" />
+                    <span>Premium quality flour</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle size={14} className="text-green-600 flex-shrink-0" />
+                    <span>Fresh dairy products</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle size={14} className="text-green-600 flex-shrink-0" />
+                    <span>Natural flavors</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle size={14} className="text-green-600 flex-shrink-0" />
+                    <span>No artificial preservatives</span>
+                  </li>
+                </ul>
               </div>
-              
-              <div className="space-y-2">
-                {[5, 4, 3, 2, 1].map((stars, index) => {
-                  const count = ratingDistribution[index];
-                  const percentage = reviews.length > 0 ? (count / reviews.length) * 100 : 0;
-                  
-                  return (
-                    <div key={stars} className="flex items-center gap-3">
-                      <span className="text-sm font-medium w-12">{stars} star</span>
-                      <div className="flex-1 h-3 bg-gray-200 rounded-full overflow-hidden">
-                        <div 
-                          className="h-full bg-yellow-400 transition-all duration-1000"
-                          style={{ width: `${percentage}%` }}
-                        ></div>
-                      </div>
-                      <span className="text-sm text-gray-600 w-12 text-right">{count}</span>
-                    </div>
-                  );
-                })}
+
+              <div className="bg-blue-50 rounded-xl p-4 md:p-6 border border-blue-200">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="p-2 md:p-3 bg-blue-100 rounded-lg">
+                    <Box className="text-blue-600" size={20} />
+                  </div>
+                  <h3 className="font-bold text-base md:text-lg">Packaging</h3>
+                </div>
+                <ul className="space-y-2 text-xs md:text-sm text-gray-600">
+                  <li className="flex items-center gap-2">
+                    <CheckCircle size={14} className="text-blue-600 flex-shrink-0" />
+                    <span>Hygienic food-grade boxes</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle size={14} className="text-blue-600 flex-shrink-0" />
+                    <span>Temperature controlled</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle size={14} className="text-blue-600 flex-shrink-0" />
+                    <span>Secure wrapping</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle size={14} className="text-blue-600 flex-shrink-0" />
+                    <span>Gift packaging available</span>
+                  </li>
+                </ul>
+              </div>
+
+              <div className="bg-purple-50 rounded-xl p-4 md:p-6 border border-purple-200">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="p-2 md:p-3 bg-purple-100 rounded-lg">
+                    <Info className="text-purple-600" size={20} />
+                  </div>
+                  <h3 className="font-bold text-base md:text-lg">Storage Tips</h3>
+                </div>
+                <ul className="space-y-2 text-xs md:text-sm text-gray-600">
+                  <li className="flex items-center gap-2">
+                    <CheckCircle size={14} className="text-purple-600 flex-shrink-0" />
+                    <span>Refrigerate immediately</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle size={14} className="text-purple-600 flex-shrink-0" />
+                    <span>Best within 24 hours</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle size={14} className="text-purple-600 flex-shrink-0" />
+                    <span>Keep at 2-8°C</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle size={14} className="text-purple-600 flex-shrink-0" />
+                    <span>Room temp before serving</span>
+                  </li>
+                </ul>
               </div>
             </div>
           )}
 
-          {/* Review Form */}
-          {showReviewForm && (
-            <form onSubmit={handleSubmitReview} className="mb-8 p-6 bg-pink-50 rounded-xl animate-scale-in">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-bold text-lg">Share Your Experience</h3>
-                <button
-                  type="button"
-                  onClick={() => setShowReviewForm(false)}
-                  className="p-2 hover:bg-pink-100 rounded-lg transition"
-                >
-                  <X size={20} />
-                </button>
-              </div>
-              <div className="space-y-4">
-                <input
-                  type="text"
-                  placeholder="Your Name"
-                  required
-                  value={reviewForm.name}
-                  onChange={e => setReviewForm({...reviewForm, name: e.target.value})}
-                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-pink-500 focus:outline-none transition"
-                />
-
-                <div>
-                  <label className="block text-sm font-semibold mb-2">Rating</label>
-                  <div className="flex gap-2">
-                    {[1,2,3,4,5].map(star => (
-                      <button
-                        key={star}
-                        type="button"
-                        onClick={() => setReviewForm({...reviewForm, rating: star})}
-                        className="transition-transform hover:scale-125"
-                      >
-                        <Star
-                          size={32}
-                          className={star <= reviewForm.rating ? 'fill-yellow-400 text-yellow-400' : 'text-gray-300'}
-                        />
-                      </button>
-                    ))}
+          {activeTab === 'reviews' && (
+            <div className="animate-fade-in">
+              {/* Rating Summary - Responsive */}
+              {reviews.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8 mb-6 md:mb-8 p-4 md:p-6 bg-gradient-to-r from-pink-50 to-purple-50 rounded-xl border-2 border-pink-200">
+                  <div className="text-center">
+                    <div className="text-5xl md:text-6xl font-bold text-pink-600 mb-2">{averageRating.toFixed(1)}</div>
+                    <div className="flex items-center justify-center gap-1 mb-2">
+                      {[...Array(5)].map((_, i) => (
+                        <Star key={i} size={20} className={i < Math.round(averageRating) ? 'fill-yellow-400 text-yellow-400' : 'text-gray-300'} />
+                      ))}
+                    </div>
+                    <p className="text-sm md:text-base text-gray-600 font-semibold">{reviews.length} {reviews.length === 1 ? 'review' : 'reviews'}</p>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    {[5, 4, 3, 2, 1].map((stars, index) => {
+                      const count = ratingDistribution[index];
+                      const percentage = reviews.length > 0 ? (count / reviews.length) * 100 : 0;
+                      
+                      return (
+                        <div key={stars} className="flex items-center gap-2 md:gap-3">
+                          <span className="text-xs md:text-sm font-semibold w-12 md:w-16 flex items-center gap-1">
+                            {stars} <Star size={10} className="fill-yellow-400 text-yellow-400" />
+                          </span>
+                          <div className="flex-1 h-2 md:h-3 bg-gray-200 rounded-full overflow-hidden">
+                            <div 
+                              className="h-full bg-gradient-to-r from-yellow-400 to-orange-400 transition-all duration-1000 rounded-full"
+                              style={{ width: `${percentage}%` }}
+                            ></div>
+                          </div>
+                          <span className="text-xs md:text-sm text-gray-600 w-8 md:w-12 text-right font-semibold">{count}</span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
+              )}
 
-                <textarea
-                  placeholder="Tell us about your experience..."
-                  required
-                  value={reviewForm.comment}
-                  onChange={e => setReviewForm({...reviewForm, comment: e.target.value})}
-                  rows={4}
-                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:border-pink-500 focus:outline-none resize-none transition"
-                />
-
-                <div className="flex gap-4">
-                  <button
-                    type="submit"
-                    className="flex-1 bg-pink-600 text-white px-6 py-3 rounded-lg hover:bg-pink-700 transition font-semibold"
-                  >
-                    Submit Review
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowReviewForm(false)}
-                    className="bg-gray-200 text-gray-700 px-6 py-3 rounded-lg hover:bg-gray-300 transition font-semibold"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            </form>
-          )}
-
-          {/* Reviews List */}
-          {reviews.length > 0 ? (
-            <div className="space-y-6">
-              {reviews.map((review, index) => (
-                <div 
-                  key={review.id} 
-                  className="border-b border-gray-200 pb-6 last:border-0 animate-fade-in"
-                  style={{ animationDelay: `${index * 50}ms` }}
+              {/* Write Review Button */}
+              <div className="mb-6 md:mb-8">
+                <button
+                  onClick={() => setShowReviewForm(!showReviewForm)}
+                  className="w-full md:w-auto bg-gradient-to-r from-pink-600 to-purple-600 text-white px-4 md:px-6 py-3 rounded-lg hover:from-pink-700 hover:to-purple-700 transition font-semibold flex items-center justify-center gap-2 shadow-lg text-sm md:text-base"
                 >
-                  <div className="flex items-start justify-between mb-3">
+                  <Plus size={18} />
+                  Write a Review
+                </button>
+              </div>
+
+              {/* Review Form */}
+              {showReviewForm && (
+                <form onSubmit={handleSubmitReview} className="mb-6 md:mb-8 p-4 md:p-6 bg-gradient-to-r from-pink-50 to-purple-50 rounded-xl border-2 border-pink-200 animate-scale-in">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-bold text-lg md:text-xl flex items-center gap-2">
+                      <Sparkles size={18} className="text-pink-600" />
+                      Share Your Experience
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => setShowReviewForm(false)}
+                      className="p-2 hover:bg-pink-100 rounded-lg transition"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <div className="space-y-4">
                     <div>
-                      <h4 className="font-bold text-lg">{review.customerName}</h4>
-                      <div className="flex items-center gap-1 mt-1">
-                        {[...Array(5)].map((_, i) => (
-                          <Star
-                            key={i}
-                            size={16}
-                            className={i < review.rating ? 'fill-yellow-400 text-yellow-400' : 'text-gray-300'}
-                          />
+                      <label className="block text-sm font-semibold mb-2">Your Name *</label>
+                      <input
+                        type="text"
+                        placeholder="Enter your name"
+                        required
+                        value={reviewForm.name}
+                        onChange={e => setReviewForm({...reviewForm, name: e.target.value})}
+                        className="w-full px-3 md:px-4 py-2 md:py-3 border-2 border-gray-200 rounded-lg focus:border-pink-500 focus:outline-none transition text-sm md:text-base"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold mb-2">Your Rating *</label>
+                      <div className="flex gap-2">
+                        {[1,2,3,4,5].map(star => (
+                          <button
+                            key={star}
+                            type="button"
+                            onClick={() => setReviewForm({...reviewForm, rating: star})}
+                            className="transition-transform hover:scale-125"
+                          >
+                            <Star
+                              size={28}
+                              className={star <= reviewForm.rating ? 'fill-yellow-400 text-yellow-400' : 'text-gray-300'}
+                            />
+                          </button>
                         ))}
                       </div>
                     </div>
-                    <span className="text-sm text-gray-500">
-                      {new Date(review.createdAt).toLocaleDateString('en-IN', {
-                        day: 'numeric',
-                        month: 'short',
-                        year: 'numeric'
-                      })}
-                    </span>
+
+                    <div>
+                      <label className="block text-sm font-semibold mb-2">Your Review *</label>
+                      <textarea
+                        placeholder="Tell us about your experience..."
+                        required
+                        value={reviewForm.comment}
+                        onChange={e => setReviewForm({...reviewForm, comment: e.target.value})}
+                        rows={4}
+                        className="w-full px-3 md:px-4 py-2 md:py-3 border-2 border-gray-200 rounded-lg focus:border-pink-500 focus:outline-none resize-none transition text-sm md:text-base"
+                        minLength={10}
+                      />
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      <button
+                        type="submit"
+                        className="flex-1 bg-gradient-to-r from-pink-600 to-purple-600 text-white px-4 md:px-6 py-3 rounded-lg hover:from-pink-700 hover:to-purple-700 transition font-semibold shadow-lg text-sm md:text-base"
+                      >
+                        Submit Review
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowReviewForm(false)}
+                        className="bg-gray-200 text-gray-700 px-4 md:px-6 py-3 rounded-lg hover:bg-gray-300 transition font-semibold text-sm md:text-base"
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   </div>
-                  <p className="text-gray-700 leading-relaxed">{review.comment}</p>
+                </form>
+              )}
+
+              {/* Reviews List */}
+              {reviews.length > 0 ? (
+                <div className="space-y-4 md:space-y-6">
+                  {reviews.map((review, index) => (
+                    <div 
+                      key={review.id} 
+                      className="border-b border-gray-200 pb-4 md:pb-6 last:border-0 hover:bg-gray-50 p-3 md:p-4 rounded-lg transition"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="w-10 h-10 md:w-12 md:h-12 bg-gradient-to-r from-pink-600 to-purple-600 rounded-full flex items-center justify-center text-white font-bold text-base md:text-lg flex-shrink-0">
+                          {review.customerName.charAt(0).toUpperCase()}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2">
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <h4 className="font-bold text-sm md:text-base">{review.customerName}</h4>
+                                {review.verified && (
+                                  <span className="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full flex items-center gap-1">
+                                    <CheckCircle size={10} />
+                                    Verified
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1 mt-1">
+                                {[...Array(5)].map((_, i) => (
+                                  <Star key={i} size={14} className={i < review.rating ? 'fill-yellow-400 text-yellow-400' : 'text-gray-300'} />
+                                ))}
+                              </div>
+                            </div>
+                            <span className="text-xs md:text-sm text-gray-500">
+                              {new Date(review.createdAt).toLocaleDateString()}
+                            </span>
+                          </div>
+                          <p className="text-xs md:text-sm text-gray-700 leading-relaxed break-words">{review.comment}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              ) : (
+                <div className="text-center py-8 md:py-12 text-gray-500">
+                  <Star className="mx-auto mb-4 text-gray-300" size={40} />
+                  <p className="text-base md:text-lg font-medium mb-2">No reviews yet</p>
+                  <p className="text-xs md:text-sm">Be the first to review this cake!</p>
+                </div>
+              )}
             </div>
-          ) : (
-            <div className="text-center py-12 text-gray-500">
-              <Star className="mx-auto mb-4 text-gray-300" size={48} />
-              <p className="text-lg font-medium mb-2">No reviews yet</p>
-              <p className="text-sm">Be the first to review this cake!</p>
+          )}
+
+          {activeTab === 'delivery' && (
+            <div className="animate-fade-in space-y-4 md:space-y-6">
+              <div className="p-4 md:p-6 bg-blue-50 rounded-xl border border-blue-200">
+                <h3 className="font-bold text-base md:text-lg mb-4 flex items-center gap-2">
+                  <Truck size={20} className="text-blue-600" />
+                  Delivery Information
+                </h3>
+                <ul className="space-y-3 text-xs md:text-sm text-gray-700">
+                  <li className="flex items-start gap-3">
+                    <Clock size={16} className="text-blue-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-semibold">Same-day delivery available</p>
+                      <p className="text-gray-600">Order before 3 PM for same-day delivery</p>
+                    </div>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <DollarSign size={16} className="text-green-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-semibold">Free delivery on orders above {currencySymbol}500</p>
+                      <p className="text-gray-600">Delivery charges: {currencySymbol}50 for orders below {currencySymbol}500</p>
+                    </div>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <ShieldCheck size={16} className="text-purple-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-semibold">Safe & hygienic packaging</p>
+                      <p className="text-gray-600">Temperature controlled delivery boxes</p>
+                    </div>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <MapPin size={16} className="text-red-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-semibold">Real-time tracking</p>
+                      <p className="text-gray-600">Track your order from kitchen to doorstep</p>
+                    </div>
+                  </li>
+                </ul>
+              </div>
+
+              {cake.deliveryPincodes && cake.deliveryPincodes.length > 0 && (
+                <div className="p-4 md:p-6 bg-cyan-50 rounded-xl border border-cyan-200">
+                  <h3 className="font-bold text-base md:text-lg mb-4 flex items-center gap-2">
+                    <MapPin size={20} className="text-cyan-600" />
+                    Delivery Pincodes
+                  </h3>
+                  <div className="flex flex-wrap gap-2">
+                    {cake.deliveryPincodes.map((pincode, idx) => (
+                      <span key={idx} className="px-3 py-1.5 bg-cyan-100 text-cyan-800 rounded-lg text-xs md:text-sm font-semibold">
+                        {pincode}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="p-4 md:p-6 bg-orange-50 rounded-xl border border-orange-200">
+                <h3 className="font-bold text-base md:text-lg mb-4 flex items-center gap-2">
+                  <Phone size={20} className="text-orange-600" />
+                  Need Help?
+                </h3>
+                <p className="text-xs md:text-sm text-gray-700 mb-3">
+                  Have questions about delivery? Our customer support team is here to help!
+                </p>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <a href="tel:+919876543210" className="flex-1 bg-orange-600 text-white px-4 py-3 rounded-lg hover:bg-orange-700 transition font-semibold text-center text-sm md:text-base">
+                    Call Now
+                  </a>
+                  <a href="https://wa.me/919876543210" className="flex-1 bg-green-600 text-white px-4 py-3 rounded-lg hover:bg-green-700 transition font-semibold text-center text-sm md:text-base">
+                    WhatsApp
+                  </a>
+                </div>
+              </div>
             </div>
           )}
         </div>
 
-        {/* Recommended Products */}
+        {/* Recommended Products - Responsive */}
         {recommendedCakes.length > 0 && (
-          <div className="mb-12 animate-fade-in">
-            <div className="flex items-center gap-2 mb-8">
-              <TrendingUp className="text-pink-600" size={28} />
-              <h2 className="text-2xl md:text-3xl font-bold">You May Also Like</h2>
+          <div className="mb-8 md:mb-12 animate-fade-in">
+            <div className="flex items-center justify-between mb-6 md:mb-8">
+              <div className="flex items-center gap-2 md:gap-3">
+                <TrendingUp className="text-pink-600" size={24} />
+                <h2 className="text-xl md:text-2xl lg:text-3xl font-bold">You May Also Like</h2>
+              </div>
+              <Link 
+                href="/cakes"
+                className="text-pink-600 hover:text-pink-700 font-semibold flex items-center gap-1 text-sm md:text-base"
+              >
+                <span className="hidden sm:inline">View All</span>
+                <ChevronRight size={20} />
+              </Link>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-              {recommendedCakes.map((recCake, index) => (
-                <Link
-                  key={recCake.id}
-                  href={`/cakes/${recCake.id}`}
-                  className="group animate-fade-in"
-                  style={{ animationDelay: `${index * 100}ms` }}
-                >
-                  <div className="bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-2">
-                    <div className="relative h-48 overflow-hidden bg-gray-100">
-                      <Image
-                        src={recCake.imageUrl || 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=400'}
-                        alt={recCake.name}
-                        fill
-                        className="object-cover group-hover:scale-110 transition-transform duration-500"
-                        sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
-                      />
+            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6">
+              {recommendedCakes.map((recCake, index) => {
+                const recDiscount = recCake.discount || 0;
+                const recOriginalPrice = recCake.basePrice || 0;
+                const recDiscountedPrice = recDiscount > 0 ? recOriginalPrice * (1 - recDiscount / 100) : recOriginalPrice;
+                const recCurrency = recCake.currency === 'CAD' ? '$' : '₹';
+
+                return (
+                  <Link
+                    key={recCake.id}
+                    href={`/cakes/${recCake.id}`}
+                    className="group animate-fade-in"
+                    style={{ animationDelay: `${index * 100}ms` }}
+                  >
+                    <div className="bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-2">
+                      <div className="relative h-32 sm:h-40 md:h-48 overflow-hidden bg-gray-100">
+                        {recDiscount > 0 && (
+                          <span className="absolute top-2 left-2 bg-red-600 text-white px-2 py-0.5 md:py-1 rounded-full text-xs font-bold z-10">
+                            {recDiscount}% OFF
+                          </span>
+                        )}
+                        {recCake.featured && (
+                          <span className="absolute top-2 right-2 bg-yellow-400 text-gray-900 px-2 py-0.5 md:py-1 rounded-full text-xs font-bold z-10">
+                            ⭐
+                          </span>
+                        )}
+                        <Image
+                          src={recCake.imageUrl || 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=400'}
+                          alt={recCake.name}
+                          fill
+                          className="object-cover group-hover:scale-110 transition-transform duration-500"
+                          sizes="(max-width: 640px) 50vw, (max-width: 1024px) 50vw, 25vw"
+                        />
+                      </div>
+                      <div className="p-3 md:p-4">
+                        <h3 className="font-bold text-sm md:text-base mb-2 group-hover:text-pink-600 transition-colors line-clamp-1">
+                          {recCake.name}
+                        </h3>
+                        {recDiscount > 0 ? (
+                          <div className="flex items-center gap-2">
+                            <span className="text-pink-600 font-bold text-base md:text-lg">{recCurrency}{recDiscountedPrice.toFixed(2)}</span>
+                            <span className="text-gray-400 line-through text-xs md:text-sm">{recCurrency}{recOriginalPrice}</span>
+                          </div>
+                        ) : (
+                          <p className="text-pink-600 font-bold text-base md:text-lg">{recCurrency}{recOriginalPrice}/kg</p>
+                        )}
+                      </div>
                     </div>
-                    <div className="p-4">
-                      <h3 className="font-bold mb-2 group-hover:text-pink-600 transition-colors line-clamp-1">
-                        {recCake.name}
-                      </h3>
-                      <p className="text-pink-600 font-bold text-lg">₹{recCake.basePrice}/kg</p>
-                    </div>
-                  </div>
-                </Link>
-              ))}
+                  </Link>
+                );
+              })}
             </div>
           </div>
         )}
       </div>
 
-      {/* Add custom animations */}
+      {/* Custom Styles */}
       <style jsx global>{`
         @keyframes fade-in {
           from { opacity: 0; transform: translateY(10px); }
@@ -786,9 +1465,9 @@ export default function CakeDetailPage() {
           to { opacity: 1; transform: scale(1); }
         }
         
-        @keyframes fade-out {
-          from { opacity: 1; }
-          to { opacity: 0; }
+        @keyframes progress {
+          from { width: 100%; }
+          to { width: 0%; }
         }
         
         .animate-fade-in {
@@ -807,8 +1486,17 @@ export default function CakeDetailPage() {
           animation: scale-in 0.3s ease-out forwards;
         }
         
-        .animate-fade-out {
-          animation: fade-out 0.3s ease-out forwards;
+        .animate-progress {
+          animation: progress 5s linear forwards;
+        }
+
+        .scrollbar-hide {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+        }
+
+        .scrollbar-hide::-webkit-scrollbar {
+          display: none;
         }
       `}</style>
     </div>

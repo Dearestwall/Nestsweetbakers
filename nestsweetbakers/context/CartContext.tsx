@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useMemo, useState, ReactNode } fr
 import { Cake } from '@/lib/types';
 
 interface CartItem extends Cake {
+  flavor: any;
   quantity: number;
   customization?: string;
 }

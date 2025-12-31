@@ -9,65 +9,104 @@ import { useToast } from '@/context/ToastContext';
 import { notificationService } from '@/lib/notificationService';
 import { Cake } from '@/lib/types';
 import { 
-  Plus, 
-  Edit, 
-  Trash2, 
-  Search, 
-  Package, 
-  DollarSign, 
-  Tag,
-  Image as ImageIcon,
-  X,
-  TrendingUp,
-  Images,
-  Copy,
-  Download,
-  Grid3x3,
-  List,
-  CheckSquare,
-  Square,
-  Trash,
-  SortAsc,
-  SortDesc,
-  Filter
+  Plus, Edit, Trash2, Search, Package, DollarSign, Tag, X, TrendingUp, Images,
+  Copy, Download, Grid3x3, List, CheckSquare, Square, Trash, Filter,
+  BadgePercent, Sparkles, MapPin, Clock, Eye, EyeOff, Calendar, Star,
+  Save, RefreshCw, Upload, FileSpreadsheet, Settings, Zap, AlertCircle,
+  CheckCircle, Info, ChevronDown, ChevronUp
 } from 'lucide-react';
 import Image from 'next/image';
 import ImageUpload from '@/components/ImageUpload';
 
+interface ExtendedCake extends Omit<Cake, 'discount' | 'stock'> {
+  discount?: number;
+  stock?: number;
+  featured?: boolean;
+  tags?: string[];
+  deliveryPincodes?: string[];
+  currency?: 'INR' | 'CAD';
+  seoKeywords?: string[];
+  availableFrom?: string;
+  availableTo?: string;
+  minOrder?: number;
+  maxOrder?: number;
+}
+
+
 export default function AdminProducts() {
-  const [products, setProducts] = useState<Cake[]>([]);
-  const [filteredProducts, setFilteredProducts] = useState<Cake[]>([]);
+  const [products, setProducts] = useState<ExtendedCake[]>([]);
+  const [filteredProducts, setFilteredProducts] = useState<ExtendedCake[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [editingProduct, setEditingProduct] = useState<Cake | null>(null);
+  const [editingProduct, setEditingProduct] = useState<ExtendedCake | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
-  const [sortBy, setSortBy] = useState<'name' | 'price' | 'orders' | 'date'>('date');
+  const [sortBy, setSortBy] = useState<'name' | 'price' | 'orders' | 'date' | 'stock'>('date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [viewMode, setViewMode] = useState<'grid' | 'list' | 'table'>('grid');
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set());
   const [bulkDeleteMode, setBulkDeleteMode] = useState(false);
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [featuredFilter, setFeaturedFilter] = useState<'all' | 'featured' | 'regular'>('all');
+  const [stockFilter, setStockFilter] = useState<'all' | 'instock' | 'lowstock' | 'outofstock'>('all');
   const [confirmModal, setConfirmModal] = useState<{
     show: boolean;
     id: string | string[];
     name: string;
     isBulk?: boolean;
   }>({ show: false, id: '', name: '', isBulk: false });
-  const { showSuccess, showError } = useToast();
+  const { showSuccess, showError, showInfo } = useToast();
 
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<{
+    name: string;
+    description: string;
+    basePrice: number;
+    category: string;
+    imageUrl: string;
+    images: string[];
+    discount: number;
+    stock?: number;
+    featured: boolean;
+    tags: string[];
+    deliveryPincodes: string[];
+    currency: 'INR' | 'CAD';
+    seoKeywords: string[];
+    availableFrom: string;
+    availableTo: string;
+    minOrder: number;
+    maxOrder: number;
+  }>({
     name: '',
     description: '',
-    basePrice: '' as string | number,
+    basePrice: 0,
     category: '',
     imageUrl: '',
-    images: [] as string[]
+    images: [],
+    discount: 0,
+    stock: undefined,
+    featured: false,
+    tags: [],
+    deliveryPincodes: [],
+    currency: 'INR',
+    seoKeywords: [],
+    availableFrom: '',
+    availableTo: '',
+    minOrder: 0.5,
+    maxOrder: 10
   });
+
+  // Calculate discounted price
+  const calculateDiscountedPrice = (price: number, discount: number) => {
+    return price - (price * discount / 100);
+  };
 
   const fetchProducts = useCallback(async () => {
     try {
       const snap = await getDocs(collection(db, 'products'));
-      const productsData = snap.docs.map(d => ({ id: d.id, ...d.data() } as Cake));
+      const productsData = snap.docs.map(d => ({ 
+        id: d.id, 
+        ...d.data() 
+      } as ExtendedCake));
       setProducts(productsData);
       setFilteredProducts(productsData);
     } catch (error) {
@@ -82,7 +121,7 @@ export default function AdminProducts() {
     fetchProducts();
   }, [fetchProducts]);
 
-  // Filter and Sort products
+  // Advanced filtering and sorting
   useEffect(() => {
     let result = [...products];
 
@@ -91,68 +130,80 @@ export default function AdminProducts() {
       result = result.filter(product => product.category === categoryFilter);
     }
 
+    // Featured filter
+    if (featuredFilter === 'featured') {
+      result = result.filter(p => p.featured === true);
+    } else if (featuredFilter === 'regular') {
+      result = result.filter(p => !p.featured);
+    }
+
+    // Stock filter
+    if (stockFilter !== 'all') {
+      result = result.filter(p => {
+        const stock = p.stock || 0;
+        switch (stockFilter) {
+          case 'instock': return stock > 10;
+          case 'lowstock': return stock > 0 && stock <= 10;
+          case 'outofstock': return stock === 0;
+          default: return true;
+        }
+      });
+    }
+
     // Search filter
     if (searchTerm.trim()) {
       const search = searchTerm.toLowerCase();
       result = result.filter(product =>
         product.name?.toLowerCase().includes(search) ||
         product.description?.toLowerCase().includes(search) ||
-        product.category?.toLowerCase().includes(search)
+        product.category?.toLowerCase().includes(search) ||
+        product.tags?.some(tag => tag.toLowerCase().includes(search))
       );
     }
 
     // Sorting
-  result.sort((a, b) => {
-    let comparison = 0;
-    switch (sortBy) {
-      case 'name':
-        comparison = (a.name || '').localeCompare(b.name || '');
-        break;
-      case 'price':
-        comparison = (a.basePrice || 0) - (b.basePrice || 0);
-        break;
-      case 'orders':
-        comparison = (a.orderCount || 0) - (b.orderCount || 0);
-        break;
-      case 'date':
-        // Safe date handling for Firestore Timestamp or Date objects
-        const getTimestamp = (dateValue: any): number => {
-          if (!dateValue) return 0;
-          
-          // Firestore Timestamp with toDate method
-          if (dateValue && typeof dateValue.toDate === 'function') {
-            return dateValue.toDate().getTime();
-          }
-          
-          // Already a Date object
-          if (dateValue instanceof Date) {
-            return dateValue.getTime();
-          }
-          
-          // String or number timestamp
-          if (typeof dateValue === 'string' || typeof dateValue === 'number') {
-            return new Date(dateValue).getTime();
-          }
-          
-          return 0;
-        };
-        
-        const aTime = getTimestamp(a.createdAt);
-        const bTime = getTimestamp(b.createdAt);
-        comparison = aTime - bTime;
-        break;
-    }
-    return sortOrder === 'asc' ? comparison : -comparison;
-  });
+    result.sort((a, b) => {
+      let comparison = 0;
+      switch (sortBy) {
+        case 'name':
+          comparison = (a.name || '').localeCompare(b.name || '');
+          break;
+        case 'price':
+          comparison = (a.basePrice || 0) - (b.basePrice || 0);
+          break;
+        case 'orders':
+          comparison = (a.orderCount || 0) - (b.orderCount || 0);
+          break;
+        case 'stock':
+          comparison = (a.stock || 0) - (b.stock || 0);
+          break;
+        case 'date':
+          const getTimestamp = (dateValue: any): number => {
+            if (!dateValue) return 0;
+            if (dateValue && typeof dateValue.toDate === 'function') {
+              return dateValue.toDate().getTime();
+            }
+            if (dateValue instanceof Date) {
+              return dateValue.getTime();
+            }
+            if (typeof dateValue === 'string' || typeof dateValue === 'number') {
+              return new Date(dateValue).getTime();
+            }
+            return 0;
+          };
+          comparison = getTimestamp(a.createdAt) - getTimestamp(b.createdAt);
+          break;
+      }
+      return sortOrder === 'asc' ? comparison : -comparison;
+    });
 
-  setFilteredProducts(result);
-}, [products, categoryFilter, searchTerm, sortBy, sortOrder]);
+    setFilteredProducts(result);
+  }, [products, categoryFilter, searchTerm, sortBy, sortOrder, featuredFilter, stockFilter]);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     
-    const price = typeof formData.basePrice === 'string' ? parseFloat(formData.basePrice) : formData.basePrice;
-    
-    if (!formData.name || !formData.description || !price || price <= 0 || !formData.category || !formData.imageUrl) {
+    if (!formData.name || !formData.description || !formData.basePrice || formData.basePrice <= 0 || !formData.category || !formData.imageUrl) {
       showError('❌ Please fill all required fields correctly');
       return;
     }
@@ -160,10 +211,21 @@ export default function AdminProducts() {
     const productData = {
       name: formData.name,
       description: formData.description,
-      basePrice: price,
+      basePrice: formData.basePrice,
       category: formData.category,
       imageUrl: formData.imageUrl,
       images: formData.images || [],
+      discount: formData.discount || 0,
+      stock: formData.stock,
+      featured: formData.featured || false,
+      tags: formData.tags || [],
+      deliveryPincodes: formData.deliveryPincodes || [],
+      currency: formData.currency || 'INR',
+      seoKeywords: formData.seoKeywords || [],
+      availableFrom: formData.availableFrom || '',
+      availableTo: formData.availableTo || '',
+      minOrder: formData.minOrder || 0.5,
+      maxOrder: formData.maxOrder || 10
     };
 
     try {
@@ -180,18 +242,27 @@ export default function AdminProducts() {
         const docRef = await addDoc(collection(db, 'products'), {
           ...productData,
           orderCount: 0,
+          rating: 0,
+          reviewCount: 0,
           createdAt: serverTimestamp()
         });
         
-        const newProduct = { id: docRef.id, ...productData, orderCount: 0 } as Cake;
+        const newProduct: ExtendedCake = { 
+          id: docRef.id, 
+          ...productData, 
+          orderCount: 0, 
+          rating: 0, 
+          reviewCount: 0,
+          createdAt: new Date().toISOString()
+        };
         setProducts([newProduct, ...products]);
         
-        // Send notification for new product
-        await notificationService.notifyNewProduct({
+        // Notify users about new product
+        notificationService.notifyNewProduct({
           id: docRef.id,
-          ...productData,
-          orderCount: 0
-        });
+          name: productData.name,
+          basePrice: productData.basePrice
+        }).catch(err => console.error('Failed to send notifications:', err));
         
         showSuccess('✅ Product added successfully');
       }
@@ -206,7 +277,6 @@ export default function AdminProducts() {
   async function handleDelete() {
     try {
       if (confirmModal.isBulk && Array.isArray(confirmModal.id)) {
-        // Bulk delete
         const batch = writeBatch(db);
         confirmModal.id.forEach(id => {
           batch.delete(doc(db, 'products', id));
@@ -218,7 +288,6 @@ export default function AdminProducts() {
         setBulkDeleteMode(false);
         showSuccess(`✅ ${confirmModal.id.length} products deleted successfully`);
       } else if (typeof confirmModal.id === 'string') {
-        // Single delete
         await deleteDoc(doc(db, 'products', confirmModal.id));
         setProducts(products.filter(p => p.id !== confirmModal.id));
         showSuccess('✅ Product deleted successfully');
@@ -231,21 +300,24 @@ export default function AdminProducts() {
     }
   }
 
-  async function duplicateProduct(product: Cake) {
+  async function duplicateProduct(product: ExtendedCake) {
     try {
+      const { id, createdAt, ...productWithoutId } = product;
       const duplicateData = {
+        ...productWithoutId,
         name: `${product.name} (Copy)`,
-        description: product.description,
-        basePrice: product.basePrice,
-        category: product.category,
-        imageUrl: product.imageUrl,
-        images: product.images || [],
         orderCount: 0,
+        rating: 0,
+        reviewCount: 0,
         createdAt: serverTimestamp()
       };
 
       const docRef = await addDoc(collection(db, 'products'), duplicateData);
-      const newProduct = { id: docRef.id, ...duplicateData, orderCount: 0 } as unknown as Cake;
+      const newProduct: ExtendedCake = { 
+        id: docRef.id, 
+        ...duplicateData,
+        createdAt: new Date().toISOString()
+      };
       setProducts([newProduct, ...products]);
       showSuccess('✅ Product duplicated successfully');
     } catch (error) {
@@ -254,14 +326,39 @@ export default function AdminProducts() {
     }
   }
 
+  async function toggleFeatured(product: ExtendedCake) {
+    if (!product.id) return;
+    
+    try {
+      const newFeatured = !product.featured;
+      await updateDoc(doc(db, 'products', product.id), {
+        featured: newFeatured
+      });
+      
+      setProducts(products.map(p => 
+        p.id === product.id ? { ...p, featured: newFeatured } : p
+      ));
+      
+      showSuccess(newFeatured ? '⭐ Product marked as featured' : '✓ Removed from featured');
+    } catch (error) {
+      showError('Failed to update product');
+    }
+  }
+
   function exportToCSV() {
-    const headers = ['Name', 'Description', 'Category', 'Base Price', 'Order Count', 'Image URL'];
+    const headers = ['Name', 'Description', 'Category', 'Base Price', 'Discount %', 'Final Price', 'Stock', 'Currency', 'Orders', 'Featured', 'Tags', 'Image URL'];
     const rows = filteredProducts.map(p => [
       p.name,
       p.description,
       p.category,
       p.basePrice,
+      p.discount || 0,
+      calculateDiscountedPrice(p.basePrice || 0, p.discount || 0),
+      p.stock || 'N/A',
+      p.currency || 'INR',
       p.orderCount || 0,
+      p.featured ? 'Yes' : 'No',
+      (p.tags || []).join('; '),
       p.imageUrl
     ]);
 
@@ -281,24 +378,46 @@ export default function AdminProducts() {
     setFormData({
       name: '',
       description: '',
-      basePrice: '',
+      basePrice: 0,
       category: '',
       imageUrl: '',
-      images: []
+      images: [],
+      discount: 0,
+      stock: undefined,
+      featured: false,
+      tags: [],
+      deliveryPincodes: [],
+      currency: 'INR',
+      seoKeywords: [],
+      availableFrom: '',
+      availableTo: '',
+      minOrder: 0.5,
+      maxOrder: 10
     });
     setEditingProduct(null);
     setShowForm(false);
   }
 
-  function editProduct(product: Cake) {
+  function editProduct(product: ExtendedCake) {
     setEditingProduct(product);
     setFormData({
       name: product.name || '',
       description: product.description || '',
-      basePrice: product.basePrice || '',
+      basePrice: product.basePrice || 0,
       category: product.category || '',
       imageUrl: product.imageUrl || '',
-      images: product.images || []
+      images: product.images || [],
+      discount: product.discount || 0,
+      stock: product.stock,
+      featured: product.featured || false,
+      tags: product.tags || [],
+      deliveryPincodes: product.deliveryPincodes || [],
+      currency: product.currency || 'INR',
+      seoKeywords: product.seoKeywords || [],
+      availableFrom: product.availableFrom || '',
+      availableTo: product.availableTo || '',
+      minOrder: product.minOrder || 0.5,
+      maxOrder: product.maxOrder || 10
     });
     setShowForm(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -336,12 +455,22 @@ export default function AdminProducts() {
     });
   }
 
-  const categories = ['Birthday', 'Wedding', 'Anniversary', 'Custom', 'Special'];
+  const categories = ['Birthday', 'Wedding', 'Anniversary', 'Custom', 'Special', 'Eggless', 'Vegan'];
+  const suggestedTags = ['Chocolate', 'Vanilla', 'Strawberry', 'Butterscotch', 'Red Velvet', 'Black Forest', 'Premium', 'Budget', 'Kids Special'];
+  
   const stats = {
     total: products.length,
-    birthday: products.filter(p => p.category === 'Birthday').length,
-    wedding: products.filter(p => p.category === 'Wedding').length,
-    custom: products.filter(p => p.category === 'Custom').length,
+    featured: products.filter(p => p.featured).length,
+    inStock: products.filter(p => (p.stock || 0) > 10).length,
+    lowStock: products.filter(p => {
+      const stock = p.stock || 0;
+      return stock > 0 && stock <= 10;
+    }).length,
+    outOfStock: products.filter(p => p.stock === 0).length,
+    totalValue: products.reduce((sum, p) => sum + (p.basePrice || 0) * (p.stock || 0), 0),
+    avgDiscount: products.length > 0 
+      ? products.reduce((sum, p) => sum + (p.discount || 0), 0) / products.length 
+      : 0
   };
 
   if (loading) {
@@ -399,16 +528,23 @@ export default function AdminProducts() {
           </h1>
           <p className="text-gray-600 mt-2 flex items-center gap-2">
             <Package size={16} />
-            Manage your cake catalog and inventory
+            Manage your complete cake catalog with advanced controls
           </p>
         </div>
         <div className="flex gap-2">
           <button
             onClick={exportToCSV}
-            className="flex items-center gap-2 px-4 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-all font-semibold"
+            className="flex items-center gap-2 px-4 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-all font-semibold shadow-lg"
           >
             <Download size={18} />
             <span className="hidden sm:inline">Export</span>
+          </button>
+          <button
+            onClick={fetchProducts}
+            className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all font-semibold shadow-lg"
+            title="Refresh"
+          >
+            <RefreshCw size={18} />
           </button>
           <button
             onClick={() => {
@@ -426,29 +562,44 @@ export default function AdminProducts() {
         </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Enhanced Stats Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
         <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-4 border-2 border-blue-200">
-          <p className="text-sm font-semibold text-blue-700 mb-1">Total Products</p>
-          <p className="text-3xl font-bold text-blue-600">{stats.total}</p>
-        </div>
-        <div className="bg-gradient-to-br from-pink-50 to-pink-100 rounded-xl p-4 border-2 border-pink-200">
-          <p className="text-sm font-semibold text-pink-700 mb-1">Birthday</p>
-          <p className="text-3xl font-bold text-pink-600">{stats.birthday}</p>
-        </div>
-        <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl p-4 border-2 border-purple-200">
-          <p className="text-sm font-semibold text-purple-700 mb-1">Wedding</p>
-          <p className="text-3xl font-bold text-purple-600">{stats.wedding}</p>
+          <p className="text-xs font-semibold text-blue-700 mb-1">Total Products</p>
+          <p className="text-2xl font-bold text-blue-600">{stats.total}</p>
         </div>
         <div className="bg-gradient-to-br from-yellow-50 to-yellow-100 rounded-xl p-4 border-2 border-yellow-200">
-          <p className="text-sm font-semibold text-yellow-700 mb-1">Custom</p>
-          <p className="text-3xl font-bold text-yellow-600">{stats.custom}</p>
+          <p className="text-xs font-semibold text-yellow-700 mb-1 flex items-center gap-1">
+            <Star size={12} />
+            Featured
+          </p>
+          <p className="text-2xl font-bold text-yellow-600">{stats.featured}</p>
+        </div>
+        <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-xl p-4 border-2 border-green-200">
+          <p className="text-xs font-semibold text-green-700 mb-1">In Stock</p>
+          <p className="text-2xl font-bold text-green-600">{stats.inStock}</p>
+        </div>
+        <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-xl p-4 border-2 border-orange-200">
+          <p className="text-xs font-semibold text-orange-700 mb-1">Low Stock</p>
+          <p className="text-2xl font-bold text-orange-600">{stats.lowStock}</p>
+        </div>
+        <div className="bg-gradient-to-br from-red-50 to-red-100 rounded-xl p-4 border-2 border-red-200">
+          <p className="text-xs font-semibold text-red-700 mb-1">Out of Stock</p>
+          <p className="text-2xl font-bold text-red-600">{stats.outOfStock}</p>
+        </div>
+        <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl p-4 border-2 border-purple-200">
+          <p className="text-xs font-semibold text-purple-700 mb-1">Inventory Value</p>
+          <p className="text-xl font-bold text-purple-600">₹{stats.totalValue.toFixed(0)}</p>
+        </div>
+        <div className="bg-gradient-to-br from-pink-50 to-pink-100 rounded-xl p-4 border-2 border-pink-200">
+          <p className="text-xs font-semibold text-pink-700 mb-1">Avg Discount</p>
+          <p className="text-2xl font-bold text-pink-600">{stats.avgDiscount.toFixed(1)}%</p>
         </div>
       </div>
 
       {/* Add/Edit Form */}
       {showForm && (
-        <div className="bg-white rounded-2xl shadow-lg p-6 animate-scale-up">
+        <div className="bg-white rounded-2xl shadow-2xl p-6 animate-scale-up border-2 border-pink-200">
           <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center gap-2">
             {editingProduct ? (
               <>
@@ -465,7 +616,7 @@ export default function AdminProducts() {
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Image Upload */}
             <ImageUpload
-              value={[formData.imageUrl, ...formData.images].filter(Boolean)}
+              value={[formData.imageUrl, ...formData.images].filter(Boolean) as string[]}
               onChange={(urls) => {
                 const urlArray = Array.isArray(urls) ? urls : [urls];
                 setFormData({
@@ -479,81 +630,334 @@ export default function AdminProducts() {
               label="Product Images (1 main + up to 4 additional) *"
             />
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Basic Information */}
+            <div className="p-4 bg-blue-50 rounded-xl border-2 border-blue-200">
+              <h3 className="font-bold text-lg text-blue-900 mb-4 flex items-center gap-2">
+                <Info size={20} />
+                Basic Information
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Product Name *
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g., Chocolate Truffle Cake"
+                    required
+                    value={formData.name}
+                    onChange={e => setFormData({...formData, name: e.target.value})}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                    <Tag size={16} />
+                    Category *
+                  </label>
+                  <select
+                    required
+                    value={formData.category}
+                    onChange={e => setFormData({...formData, category: e.target.value})}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all"
+                  >
+                    <option value="">Select Category</option>
+                    {categories.map(cat => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Description *
+                  </label>
+                  <textarea
+                    placeholder="Describe your delicious cake in detail..."
+                    required
+                    value={formData.description}
+                    onChange={e => setFormData({...formData, description: e.target.value})}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all resize-none"
+                    rows={3}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Pricing & Discount */}
+            <div className="p-4 bg-green-50 rounded-xl border-2 border-green-200">
+              <h3 className="font-bold text-lg text-green-900 mb-4 flex items-center gap-2">
+                <DollarSign size={20} />
+                Pricing & Discount
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Currency *
+                  </label>
+                  <select
+                    value={formData.currency}
+                    onChange={e => setFormData({...formData, currency: e.target.value as 'INR' | 'CAD'})}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all"
+                  >
+                    <option value="INR">₹ INR (Rupees)</option>
+                    <option value="CAD">$ CAD (Canadian Dollar)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Base Price ({formData.currency === 'CAD' ? '$' : '₹'}) *
+                  </label>
+                  <input
+                    type="number"
+                    placeholder="500"
+                    required
+                    min="1"
+                    step="0.01"
+                    value={formData.basePrice || ''}
+                    onChange={e => setFormData({...formData, basePrice: parseFloat(e.target.value) || 0})}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                    <BadgePercent size={16} />
+                    Discount (%)
+                  </label>
+                  <input
+                    type="number"
+                    placeholder="0"
+                    min="0"
+                    max="100"
+                    value={formData.discount}
+                    onChange={e => setFormData({...formData, discount: parseInt(e.target.value) || 0})}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all"
+                  />
+                </div>
+              </div>
+
+              {/* Discount Calculation Display */}
+              {formData.basePrice && formData.discount && formData.discount > 0 && (
+                <div className="mt-4 p-4 bg-yellow-100 rounded-lg border-2 border-yellow-300">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="font-semibold text-yellow-900">Original Price:</span>
+                    <span className="text-gray-700 line-through">
+                      {formData.currency === 'CAD' ? '$' : '₹'}{formData.basePrice}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-lg font-bold mt-2">
+                    <span className="text-green-900">Final Price:</span>
+                    <span className="text-green-700">
+                      {formData.currency === 'CAD' ? '$' : '₹'}
+                      {calculateDiscountedPrice(formData.basePrice, formData.discount).toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm mt-1">
+                    <span className="text-green-700">You Save:</span>
+                    <span className="text-green-600 font-semibold">
+                      {formData.currency === 'CAD' ? '$' : '₹'}
+                      {(formData.basePrice * (formData.discount / 100)).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Inventory Management */}
+            <div className="p-4 bg-purple-50 rounded-xl border-2 border-purple-200">
+              <h3 className="font-bold text-lg text-purple-900 mb-4 flex items-center gap-2">
+                <Package size={20} />
+                Inventory & Limits
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Stock Quantity
+                  </label>
+                  <input
+                    type="number"
+                    placeholder="Leave empty for unlimited"
+                    min="0"
+                    value={formData.stock || ''}
+                    onChange={e => setFormData({...formData, stock: e.target.value ? parseInt(e.target.value) : undefined})}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Min Order (kg)
+                  </label>
+                  <input
+                    type="number"
+                    placeholder="0.5"
+                    min="0.5"
+                    step="0.5"
+                    value={formData.minOrder}
+                    onChange={e => setFormData({...formData, minOrder: parseFloat(e.target.value) || 0.5})}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Max Order (kg)
+                  </label>
+                  <input
+                    type="number"
+                    placeholder="10"
+                    min="1"
+                    value={formData.maxOrder}
+                    onChange={e => setFormData({...formData, maxOrder: parseFloat(e.target.value) || 10})}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Tags & Keywords */}
+            <div className="p-4 bg-orange-50 rounded-xl border-2 border-orange-200">
+              <h3 className="font-bold text-lg text-orange-900 mb-4 flex items-center gap-2">
+                <Tag size={20} />
+                Tags & SEO
+              </h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Product Tags (comma separated)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g., Chocolate, Premium, Birthday Special"
+                    value={(formData.tags || []).join(', ')}
+                    onChange={e => setFormData({...formData, tags: e.target.value.split(',').map(t => t.trim()).filter(Boolean)})}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all"
+                  />
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {suggestedTags.map(tag => (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => {
+                          const currentTags = formData.tags || [];
+                          if (!currentTags.includes(tag)) {
+                            setFormData({...formData, tags: [...currentTags, tag]});
+                          }
+                        }}
+                        className="text-xs px-2 py-1 bg-orange-100 text-orange-700 rounded-full hover:bg-orange-200 transition"
+                      >
+                        + {tag}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    SEO Keywords (comma separated)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g., best chocolate cake, birthday cake online"
+                    value={(formData.seoKeywords || []).join(', ')}
+                    onChange={e => setFormData({...formData, seoKeywords: e.target.value.split(',').map(k => k.trim()).filter(Boolean)})}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Delivery Pincodes */}
+            <div className="p-4 bg-cyan-50 rounded-xl border-2 border-cyan-200">
+              <h3 className="font-bold text-lg text-cyan-900 mb-4 flex items-center gap-2">
+                <MapPin size={20} />
+                Delivery Areas
+              </h3>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Product Name *
+                  Delivery Pincodes (comma separated) - Leave empty for all areas
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g., Chocolate Truffle Cake"
-                  required
-                  value={formData.name}
-                  onChange={e => setFormData({...formData, name: e.target.value})}
+                  placeholder="e.g., 110001, 110002, 110003"
+                  value={(formData.deliveryPincodes || []).join(', ')}
+                  onChange={e => setFormData({...formData, deliveryPincodes: e.target.value.split(',').map(p => p.trim()).filter(Boolean)})}
                   className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all"
                 />
+                <p className="text-xs text-gray-500 mt-2">
+                  💡 Tip: Add specific pincodes where this product can be delivered. Leave empty to deliver everywhere.
+                </p>
               </div>
+            </div>
 
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                  <Tag size={16} />
-                  Category *
-                </label>
-                <select
-                  required
-                  value={formData.category}
-                  onChange={e => setFormData({...formData, category: e.target.value})}
-                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all"
-                >
-                  <option value="">Select Category</option>
-                  {categories.map(cat => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
-                </select>
+            {/* Availability Schedule */}
+            <div className="p-4 bg-teal-50 rounded-xl border-2 border-teal-200">
+              <h3 className="font-bold text-lg text-teal-900 mb-4 flex items-center gap-2">
+                <Calendar size={20} />
+                Availability Schedule (Optional)
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Available From
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.availableFrom}
+                    onChange={e => setFormData({...formData, availableFrom: e.target.value})}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Available To
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.availableTo}
+                    onChange={e => setFormData({...formData, availableTo: e.target.value})}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all"
+                  />
+                </div>
               </div>
             </div>
-            
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">
-                Description *
+
+            {/* Featured Toggle */}
+            <div className="p-4 bg-yellow-50 rounded-xl border-2 border-yellow-200">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.featured}
+                  onChange={e => setFormData({...formData, featured: e.target.checked})}
+                  className="w-5 h-5 text-yellow-600 border-2 border-yellow-400 rounded focus:ring-2 focus:ring-yellow-500"
+                />
+                <div>
+                  <span className="font-bold text-yellow-900 flex items-center gap-2">
+                    <Star size={20} className="fill-yellow-500 text-yellow-500" />
+                    Mark as Featured Product
+                  </span>
+                  <p className="text-sm text-yellow-700">Featured products appear on homepage and get priority display</p>
+                </div>
               </label>
-              <textarea
-                placeholder="Describe your delicious cake..."
-                required
-                value={formData.description}
-                onChange={e => setFormData({...formData, description: e.target.value})}
-                className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all resize-none"
-                rows={4}
-              />
             </div>
-            
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                <DollarSign size={16} />
-                Base Price (₹) *
-              </label>
-              <input
-                type="number"
-                placeholder="500"
-                required
-                min="1"
-                value={formData.basePrice}
-                onChange={e => setFormData({...formData, basePrice: e.target.value})}
-                className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all"
-              />
-            </div>
-            
+
+            {/* Submit Buttons */}
             <div className="flex gap-4 pt-4">
               <button
                 type="submit"
-                className="flex-1 bg-gradient-to-r from-pink-600 to-purple-600 text-white px-6 py-3 rounded-xl hover:from-pink-700 hover:to-purple-700 transition-all font-semibold transform hover:scale-105"
+                className="flex-1 bg-gradient-to-r from-pink-600 to-purple-600 text-white px-6 py-4 rounded-xl hover:from-pink-700 hover:to-purple-700 transition-all font-bold text-lg transform hover:scale-105 shadow-lg flex items-center justify-center gap-2"
               >
+                <Save size={20} />
                 {editingProduct ? 'Update Product' : 'Add Product'}
               </button>
               <button
                 type="button"
                 onClick={resetForm}
-                className="flex-1 bg-gray-200 text-gray-700 px-6 py-3 rounded-xl hover:bg-gray-300 transition-all font-semibold"
+                className="flex-1 bg-gray-200 text-gray-700 px-6 py-4 rounded-xl hover:bg-gray-300 transition-all font-semibold text-lg"
               >
                 Cancel
               </button>
@@ -565,17 +969,17 @@ export default function AdminProducts() {
       {/* Search, Filter & Actions Bar */}
       <div className="bg-white rounded-2xl shadow-lg p-4 space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
-          <div className="md:col-span-6 relative">
+          <div className="md:col-span-5 relative">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
             <input
               type="text"
-              placeholder="Search products..."
+              placeholder="Search by name, category, tags..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-12 pr-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all"
             />
           </div>
-          <div className="md:col-span-3">
+          <div className="md:col-span-2">
             <select
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
@@ -585,6 +989,17 @@ export default function AdminProducts() {
               {categories.map(cat => (
                 <option key={cat} value={cat}>{cat}</option>
               ))}
+            </select>
+          </div>
+          <div className="md:col-span-2">
+            <select
+              value={featuredFilter}
+              onChange={(e) => setFeaturedFilter(e.target.value as any)}
+              className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all"
+            >
+              <option value="all">All Products</option>
+              <option value="featured">Featured Only</option>
+              <option value="regular">Regular Only</option>
             </select>
           </div>
           <div className="md:col-span-3">
@@ -604,9 +1019,41 @@ export default function AdminProducts() {
               <option value="price-asc">Price (Low-High)</option>
               <option value="price-desc">Price (High-Low)</option>
               <option value="orders-desc">Most Orders</option>
+              <option value="stock-asc">Low Stock First</option>
             </select>
           </div>
         </div>
+
+        {/* Advanced Filters Toggle */}
+        <button
+          onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+          className="flex items-center gap-2 text-pink-600 font-semibold hover:text-pink-700 transition"
+        >
+          <Filter size={16} />
+          Advanced Filters
+          {showAdvancedFilters ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+        </button>
+
+        {/* Advanced Filters */}
+        {showAdvancedFilters && (
+          <div className="p-4 bg-gray-50 rounded-xl border-2 border-gray-200 animate-scale-up">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Stock Status</label>
+                <select
+                  value={stockFilter}
+                  onChange={(e) => setStockFilter(e.target.value as any)}
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all"
+                >
+                  <option value="all">All Stock Levels</option>
+                  <option value="instock">In Stock (10+)</option>
+                  <option value="lowstock">Low Stock (1-10)</option>
+                  <option value="outofstock">Out of Stock</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Actions Row */}
         <div className="flex flex-wrap items-center justify-between gap-4">
@@ -637,7 +1084,7 @@ export default function AdminProducts() {
                 {selectedProducts.size > 0 && (
                   <button
                     onClick={handleBulkDelete}
-                    className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700"
+                    className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 shadow-lg"
                   >
                     <Trash size={18} />
                     Delete ({selectedProducts.size})
@@ -648,6 +1095,7 @@ export default function AdminProducts() {
           </div>
 
           <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-600 font-medium">View:</span>
             <button
               onClick={() => setViewMode('grid')}
               className={`p-2 rounded-lg transition-all ${
@@ -655,6 +1103,7 @@ export default function AdminProducts() {
                   ? 'bg-pink-600 text-white' 
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
+              title="Grid View"
             >
               <Grid3x3 size={20} />
             </button>
@@ -665,193 +1114,462 @@ export default function AdminProducts() {
                   ? 'bg-pink-600 text-white' 
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
+              title="List View"
             >
               <List size={20} />
+            </button>
+            <button
+              onClick={() => setViewMode('table')}
+              className={`p-2 rounded-lg transition-all ${
+                viewMode === 'table' 
+                  ? 'bg-pink-600 text-white' 
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+              title="Table View"
+            >
+              <FileSpreadsheet size={20} />
             </button>
           </div>
         </div>
       </div>
       
-      {/* Products Grid/List */}
+      {/* Products Display */}
       {filteredProducts.length === 0 ? (
         <div className="bg-white rounded-2xl shadow-lg p-12 text-center">
           <Package className="mx-auto text-gray-300 mb-4" size={64} />
           <p className="text-gray-500 text-lg font-semibold">No products found</p>
           <p className="text-gray-400 text-sm mt-2">Try adjusting your filters or add a new product</p>
         </div>
+      ) : viewMode === 'table' ? (
+        // Table View
+        <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gradient-to-r from-pink-50 to-purple-50">
+                <tr>
+                  {bulkDeleteMode && (
+                    <th className="px-4 py-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedProducts.size === filteredProducts.length}
+                        onChange={selectAllProducts}
+                        className="w-5 h-5"
+                      />
+                    </th>
+                  )}
+                  <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Image</th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Name</th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Category</th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Price</th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Discount</th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Final Price</th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Stock</th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Orders</th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Status</th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-gray-700 uppercase">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {filteredProducts.map((product, index) => {
+                  const finalPrice = calculateDiscountedPrice(product.basePrice || 0, product.discount || 0);
+                  const stockStatus = product.stock === undefined ? 'unlimited' : 
+                                     product.stock === 0 ? 'out' : 
+                                     product.stock <= 10 ? 'low' : 'in';
+                  
+                  return (
+                    <tr key={product.id} className="hover:bg-gray-50 transition">
+                      {bulkDeleteMode && (
+                        <td className="px-4 py-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedProducts.has(product.id!)}
+                            onChange={() => toggleSelectProduct(product.id!)}
+                            className="w-5 h-5"
+                          />
+                        </td>
+                      )}
+                      <td className="px-4 py-3">
+                        <div className="relative w-16 h-16 rounded-lg overflow-hidden">
+                          <Image
+                            src={product.imageUrl || 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=600'}
+                            alt={product.name}
+                            fill
+                            className="object-cover"
+                            sizes="64px"
+                          />
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div>
+                          <p className="font-semibold text-gray-800">{product.name}</p>
+                          {product.featured && (
+                            <span className="inline-flex items-center gap-1 text-xs text-yellow-700 mt-1">
+                              <Star size={12} className="fill-yellow-500" />
+                              Featured
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded-lg text-xs font-semibold">
+                          {product.category}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 font-semibold">
+                        {product.currency === 'CAD' ? '$' : '₹'}{product.basePrice}
+                      </td>
+                      <td className="px-4 py-3">
+                        {product.discount && product.discount > 0 ? (
+                          <span className="px-2 py-1 bg-red-100 text-red-700 rounded-lg text-xs font-bold">
+                            {product.discount}% OFF
+                          </span>
+                        ) : (
+                          <span className="text-gray-400 text-xs">-</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 font-bold text-pink-600">
+                        {product.currency === 'CAD' ? '$' : '₹'}{finalPrice.toFixed(2)}
+                      </td>
+                      <td className="px-4 py-3">
+                        {stockStatus === 'unlimited' ? (
+                          <span className="text-green-600 text-xs font-semibold">Unlimited</span>
+                        ) : stockStatus === 'out' ? (
+                          <span className="px-2 py-1 bg-red-100 text-red-700 rounded-lg text-xs font-bold">Out</span>
+                        ) : stockStatus === 'low' ? (
+                          <span className="px-2 py-1 bg-orange-100 text-orange-700 rounded-lg text-xs font-bold">{product.stock}</span>
+                        ) : (
+                          <span className="px-2 py-1 bg-green-100 text-green-700 rounded-lg text-xs font-bold">{product.stock}</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="flex items-center gap-1 text-sm font-semibold text-gray-700">
+                          <TrendingUp size={14} className="text-green-500" />
+                          {product.orderCount || 0}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={() => toggleFeatured(product)}
+                          className={`p-2 rounded-lg transition ${
+                            product.featured 
+                              ? 'bg-yellow-100 text-yellow-700' 
+                              : 'bg-gray-100 text-gray-400'
+                          }`}
+                          title={product.featured ? 'Remove from featured' : 'Add to featured'}
+                        >
+                          <Star size={16} className={product.featured ? 'fill-current' : ''} />
+                        </button>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => editProduct(product)}
+                            className="p-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition"
+                            title="Edit"
+                          >
+                            <Edit size={16} />
+                          </button>
+                          <button
+                            onClick={() => duplicateProduct(product)}
+                            className="p-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition"
+                            title="Duplicate"
+                          >
+                            <Copy size={16} />
+                          </button>
+                          {product.id && (
+                            <button
+                              onClick={() => setConfirmModal({ show: true, id: product.id!, name: product.name, isBulk: false })}
+                              className="p-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition"
+                              title="Delete"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
       ) : (
+        // Grid/List View (existing code continues...)
         <div className={viewMode === 'grid' 
           ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6' 
           : 'space-y-4'
         }>
-          {filteredProducts.map((product) => (
-            <div 
-              key={product.id} 
-              className={`bg-white rounded-2xl shadow-lg overflow-hidden hover:shadow-2xl transition-all ${
-                viewMode === 'grid' ? 'transform hover:-translate-y-1' : ''
-              } ${
-                selectedProducts.has(product.id!) ? 'ring-4 ring-pink-500' : ''
-              }`}
-            >
-              {viewMode === 'grid' ? (
-                // Grid View
-                <>
-                  <div className="relative h-48 w-full">
-                    {bulkDeleteMode && (
-                      <div className="absolute top-3 left-3 z-10">
-                        <button
-                          onClick={() => toggleSelectProduct(product.id!)}
-                          className="p-2 bg-white rounded-lg shadow-lg"
-                        >
-                          {selectedProducts.has(product.id!) ? (
-                            <CheckSquare className="text-pink-600" size={24} />
-                          ) : (
-                            <Square className="text-gray-400" size={24} />
-                          )}
-                        </button>
-                      </div>
-                    )}
-                    <Image 
-                      src={product.imageUrl || 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=600'} 
-                      alt={product.name} 
-                      fill
-                      className="object-cover"
-                      sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-                    />
-                    <div className="absolute top-3 right-3">
-                      <span className="px-3 py-1.5 bg-white/90 backdrop-blur-sm rounded-full text-xs font-bold text-gray-800 border-2 border-white">
-                        {product.category}
-                      </span>
-                    </div>
-                    {product.images && product.images.length > 0 && (
-                      <div className="absolute bottom-3 left-3">
-                        <span className="px-2 py-1 bg-purple-600 text-white rounded-full text-xs font-bold flex items-center gap-1">
-                          <Images size={12} />
-                          +{product.images.length}
+          {filteredProducts.map((product) => {
+            const finalPrice = calculateDiscountedPrice(product.basePrice || 0, product.discount || 0);
+            const stockStatus = product.stock === undefined ? 'unlimited' : 
+                               product.stock === 0 ? 'out' : 
+                               product.stock <= 10 ? 'low' : 'in';
+
+            return (
+              <div 
+                key={product.id} 
+                className={`bg-white rounded-2xl shadow-lg overflow-hidden hover:shadow-2xl transition-all ${
+                  viewMode === 'grid' ? 'transform hover:-translate-y-1' : ''
+                } ${
+                  selectedProducts.has(product.id!) ? 'ring-4 ring-pink-500' : ''
+                }`}
+              >
+                {viewMode === 'grid' ? (
+                  // Grid View Card
+                  <>
+                    <div className="relative h-48 w-full">
+                      {bulkDeleteMode && (
+                        <div className="absolute top-3 left-3 z-10">
+                          <button
+                            onClick={() => toggleSelectProduct(product.id!)}
+                            className="p-2 bg-white rounded-lg shadow-lg"
+                          >
+                            {selectedProducts.has(product.id!) ? (
+                              <CheckSquare className="text-pink-600" size={24} />
+                            ) : (
+                              <Square className="text-gray-400" size={24} />
+                            )}
+                          </button>
+                        </div>
+                      )}
+                      <Image 
+                        src={product.imageUrl || 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=600'} 
+                        alt={product.name} 
+                        fill
+                        className="object-cover"
+                        sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+                      />
+                      
+                      {/* Top Right Badges */}
+                      <div className="absolute top-3 right-3 flex flex-col gap-2">
+                        {product.featured && (
+                          <span className="px-2 py-1 bg-yellow-400 text-gray-900 rounded-full text-xs font-bold flex items-center gap-1 shadow-lg">
+                            <Star size={12} className="fill-current" />
+                            Featured
+                          </span>
+                        )}
+                        {product.discount && product.discount > 0 && (
+                          <span className="px-2 py-1 bg-red-600 text-white rounded-full text-xs font-bold shadow-lg">
+                            {product.discount}% OFF
+                          </span>
+                        )}
+                        <span className="px-2 py-1 bg-white/90 backdrop-blur-sm rounded-full text-xs font-bold text-gray-800 border-2 border-white">
+                          {product.category}
                         </span>
                       </div>
-                    )}
-                  </div>
-                  
-                  <div className="p-5">
-                    <h3 className="font-bold text-xl text-gray-800 mb-2 line-clamp-1">{product.name}</h3>
-                    <p className="text-gray-600 text-sm mb-4 line-clamp-2">{product.description}</p>
-                    
-                    <div className="flex items-center justify-between mb-4">
-                      <div>
-                        <p className="text-xs text-gray-500 mb-1">Base Price</p>
-                        <p className="text-2xl font-bold text-pink-600">₹{product.basePrice}</p>
+
+                      {/* Stock Badge */}
+                      <div className="absolute bottom-3 left-3">
+                        {stockStatus === 'out' && (
+                          <span className="px-2 py-1 bg-red-600 text-white rounded-full text-xs font-bold">
+                            Out of Stock
+                          </span>
+                        )}
+                        {stockStatus === 'low' && (
+                          <span className="px-2 py-1 bg-orange-500 text-white rounded-full text-xs font-bold">
+                            Only {product.stock} left!
+                          </span>
+                        )}
                       </div>
-                      {product.orderCount !== undefined && (
+
+                      {/* Images Count */}
+                      {product.images && product.images.length > 0 && (
+                        <div className="absolute bottom-3 right-3">
+                          <span className="px-2 py-1 bg-purple-600 text-white rounded-full text-xs font-bold flex items-center gap-1">
+                            <Images size={12} />
+                            +{product.images.length}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div className="p-5">
+                      <div className="flex items-start justify-between mb-2">
+                        <h3 className="font-bold text-xl text-gray-800 line-clamp-1 flex-1">{product.name}</h3>
+                        <button
+                          onClick={() => toggleFeatured(product)}
+                          className="ml-2 flex-shrink-0"
+                          title={product.featured ? 'Remove from featured' : 'Add to featured'}
+                        >
+                          <Star 
+                            size={20} 
+                            className={product.featured ? 'fill-yellow-400 text-yellow-400' : 'text-gray-300'} 
+                          />
+                        </button>
+                      </div>
+                      
+                      <p className="text-gray-600 text-sm mb-4 line-clamp-2">{product.description}</p>
+
+                      {/* Tags */}
+                      {product.tags && product.tags.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mb-3">
+                          {product.tags.slice(0, 3).map((tag, idx) => (
+                            <span key={idx} className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs">
+                              {tag}
+                            </span>
+                          ))}
+                          {product.tags.length > 3 && (
+                            <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs">
+                              +{product.tags.length - 3}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      
+                      <div className="flex items-center justify-between mb-4">
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">
+                            {product.discount && product.discount > 0 ? (
+                              <>
+                                <span className="line-through mr-2">
+                                  {product.currency === 'CAD' ? '$' : '₹'}{product.basePrice}
+                                </span>
+                                <span className="text-green-600 font-semibold">
+                                  Save {product.currency === 'CAD' ? '$' : '₹'}
+                                  {((product.basePrice || 0) - finalPrice).toFixed(2)}
+                                </span>
+                              </>
+                            ) : (
+                              'Price'
+                            )}
+                          </p>
+                          <p className="text-2xl font-bold text-pink-600">
+                            {product.currency === 'CAD' ? '$' : '₹'}{finalPrice.toFixed(2)}
+                          </p>
+                        </div>
                         <div className="text-right">
                           <p className="text-xs text-gray-500 mb-1">Orders</p>
                           <p className="text-lg font-bold text-gray-800 flex items-center gap-1">
                             <TrendingUp size={16} className="text-green-500" />
-                            {product.orderCount}
+                            {product.orderCount || 0}
                           </p>
                         </div>
-                      )}
+                      </div>
+                      
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => editProduct(product)}
+                          className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 bg-blue-100 text-blue-700 rounded-xl hover:bg-blue-200 transition-all font-semibold transform hover:scale-105 border-2 border-blue-200"
+                        >
+                          <Edit size={16} />
+                        </button>
+                        <button
+                          onClick={() => duplicateProduct(product)}
+                          className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 bg-green-100 text-green-700 rounded-xl hover:bg-green-200 transition-all font-semibold transform hover:scale-105 border-2 border-green-200"
+                        >
+                          <Copy size={16} />
+                        </button>
+                        {product.id && (
+                          <button
+                            onClick={() => setConfirmModal({ show: true, id: product.id!, name: product.name, isBulk: false })}
+                            className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 bg-red-100 text-red-700 rounded-xl hover:bg-red-200 transition-all font-semibold transform hover:scale-105 border-2 border-red-200"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  // List View
+                  <div className="flex items-center gap-4 p-4">
+                    {bulkDeleteMode && (
+                      <button
+                        onClick={() => toggleSelectProduct(product.id!)}
+                        className="p-2"
+                      >
+                        {selectedProducts.has(product.id!) ? (
+                          <CheckSquare className="text-pink-600" size={24} />
+                        ) : (
+                          <Square className="text-gray-400" size={24} />
+                        )}
+                      </button>
+                    )}
+                    
+                    <div className="relative w-24 h-24 flex-shrink-0 rounded-lg overflow-hidden">
+                      <Image 
+                        src={product.imageUrl || 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=600'} 
+                        alt={product.name} 
+                        fill
+                        className="object-cover"
+                        sizes="96px"
+                      />
+                    </div>
+                    
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start gap-2 mb-1">
+                        <h3 className="font-bold text-lg text-gray-800 flex-1">{product.name}</h3>
+                        <button
+                          onClick={() => toggleFeatured(product)}
+                          title={product.featured ? 'Remove from featured' : 'Add to featured'}
+                        >
+                          <Star 
+                            size={18} 
+                            className={product.featured ? 'fill-yellow-400 text-yellow-400' : 'text-gray-300'} 
+                          />
+                        </button>
+                      </div>
+                      <p className="text-gray-600 text-sm mb-2 line-clamp-1">{product.description}</p>
+                      <div className="flex items-center gap-4 flex-wrap">
+                        <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded-lg text-xs font-bold">
+                          {product.category}
+                        </span>
+                        <span className="text-lg font-bold text-pink-600">
+                          {product.currency === 'CAD' ? '$' : '₹'}{finalPrice.toFixed(2)}
+                        </span>
+                        {product.discount && product.discount > 0 && (
+                          <span className="px-2 py-1 bg-red-100 text-red-700 rounded-lg text-xs font-bold">
+                            {product.discount}% OFF
+                          </span>
+                        )}
+                        <span className="text-sm text-gray-600 flex items-center gap-1">
+                          <TrendingUp size={14} className="text-green-500" />
+                          {product.orderCount || 0} orders
+                        </span>
+                        {stockStatus === 'low' && (
+                          <span className="px-2 py-1 bg-orange-100 text-orange-700 rounded-lg text-xs font-bold">
+                            Low Stock ({product.stock})
+                          </span>
+                        )}
+                        {stockStatus === 'out' && (
+                          <span className="px-2 py-1 bg-red-100 text-red-700 rounded-lg text-xs font-bold">
+                            Out of Stock
+                          </span>
+                        )}
+                      </div>
                     </div>
                     
                     <div className="flex gap-2">
                       <button
                         onClick={() => editProduct(product)}
-                        className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 bg-blue-100 text-blue-700 rounded-xl hover:bg-blue-200 transition-all font-semibold transform hover:scale-105 border-2 border-blue-200"
+                        className="p-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-all"
                         title="Edit"
                       >
-                        <Edit size={16} />
+                        <Edit size={18} />
                       </button>
                       <button
                         onClick={() => duplicateProduct(product)}
-                        className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 bg-green-100 text-green-700 rounded-xl hover:bg-green-200 transition-all font-semibold transform hover:scale-105 border-2 border-green-200"
+                        className="p-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-all"
                         title="Duplicate"
                       >
-                        <Copy size={16} />
+                        <Copy size={18} />
                       </button>
                       {product.id && (
                         <button
                           onClick={() => setConfirmModal({ show: true, id: product.id!, name: product.name, isBulk: false })}
-                          className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 bg-red-100 text-red-700 rounded-xl hover:bg-red-200 transition-all font-semibold transform hover:scale-105 border-2 border-red-200"
+                          className="p-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-all"
                           title="Delete"
                         >
-                          <Trash2 size={16} />
+                          <Trash2 size={18} />
                         </button>
                       )}
                     </div>
                   </div>
-                </>
-              ) : (
-                // List View
-                <div className="flex items-center gap-4 p-4">
-                  {bulkDeleteMode && (
-                    <button
-                      onClick={() => toggleSelectProduct(product.id!)}
-                      className="p-2"
-                    >
-                      {selectedProducts.has(product.id!) ? (
-                        <CheckSquare className="text-pink-600" size={24} />
-                      ) : (
-                        <Square className="text-gray-400" size={24} />
-                      )}
-                    </button>
-                  )}
-                  
-                  <div className="relative w-24 h-24 flex-shrink-0 rounded-lg overflow-hidden">
-                    <Image 
-                      src={product.imageUrl || 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=600'} 
-                      alt={product.name} 
-                      fill
-                      className="object-cover"
-                      sizes="96px"
-                    />
-                  </div>
-                  
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-bold text-lg text-gray-800 mb-1">{product.name}</h3>
-                    <p className="text-gray-600 text-sm mb-2 line-clamp-1">{product.description}</p>
-                    <div className="flex items-center gap-4">
-                      <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded-lg text-xs font-bold">
-                        {product.category}
-                      </span>
-                      <span className="text-lg font-bold text-pink-600">₹{product.basePrice}</span>
-                      {product.orderCount !== undefined && (
-                        <span className="text-sm text-gray-600 flex items-center gap-1">
-                          <TrendingUp size={14} className="text-green-500" />
-                          {product.orderCount} orders
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => editProduct(product)}
-                      className="p-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-all"
-                      title="Edit"
-                    >
-                      <Edit size={18} />
-                    </button>
-                    <button
-                      onClick={() => duplicateProduct(product)}
-                      className="p-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-all"
-                      title="Duplicate"
-                    >
-                      <Copy size={18} />
-                    </button>
-                    {product.id && (
-                      <button
-                        onClick={() => setConfirmModal({ show: true, id: product.id!, name: product.name, isBulk: false })}
-                        className="p-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-all"
-                        title="Delete"
-                      >
-                        <Trash2 size={18} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
