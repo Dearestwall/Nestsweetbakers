@@ -1,21 +1,23 @@
+// lib/types.ts
+
 // Product/Cake Interface
 export interface Cake {
-  discount: number;
-  stock: number;
   id?: string;
   name: string;
   description: string;
   basePrice: number;
   category: string;
-   imageUrl: string; // Main image
+  imageUrl: string; // Main image
   images?: string[]; // Additional images (max 5)
   rating: number;
   reviewCount: number;
   orderCount?: number;
-  createdAt?: string;
-  updatedAt?: string;
+  discount: number;
+  stock: number;
+  createdAt?: string | any; // Can be Timestamp or string
+  updatedAt?: string | any;
   isAvailable?: boolean;
-  flavors?: string[];
+  flavors?: string[]; // Available flavors
   sizes?: string[];
   tags?: string[];
 }
@@ -100,7 +102,7 @@ export interface User {
   };
 }
 
-// Cart Item Interface
+// Cart Item Interface (used in CartContext)
 export interface CartItem {
   id: string;
   cakeId: string;
@@ -172,6 +174,8 @@ export interface SiteSettings {
   email: string;
   address: string;
   workingHours?: string;
+  businessHours?: string; // Add this
+  whatsapp?: string; // Add this
   minOrderValue?: number;
   deliveryFee?: number;
   freeDeliveryThreshold?: number;
@@ -216,8 +220,9 @@ export interface Testimonial {
   comment: string;
   image?: string;
   date: string;
-  order: number;
+  order?: number;
   isApproved?: boolean;
+  createdAt?: string | any;
 }
 
 // Stats Interface

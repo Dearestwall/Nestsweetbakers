@@ -10,6 +10,7 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
+    "@formspree/react": "^3.0.0",
     "cloudinary": "^2.8.0",
     "firebase": "^11.1.0",
     "lucide-react": "^0.562.0",

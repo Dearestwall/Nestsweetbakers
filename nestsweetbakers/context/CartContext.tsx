@@ -4,17 +4,17 @@ import { createContext, useContext, useEffect, useMemo, useState, ReactNode } fr
 import { Cake } from '@/lib/types';
 
 interface CartItem extends Cake {
-  flavor: any;
   quantity: number;
   customization?: string;
+  flavor: string; // Required field
 }
 
 interface CartContextType {
   cart: CartItem[];
   cartCount: number;
   totalPrice: number;
-  isHydrated: boolean; // ✅ ADD THIS
-  addToCart: (item: Cake, quantity?: number, customization?: string) => void;
+  isHydrated: boolean;
+  addToCart: (item: Cake, quantity?: number, customization?: string, flavor?: string) => void;
   removeFromCart: (id: string) => void;
   updateQuantity: (id: string, quantity: number) => void;
   clearCart: () => void;
@@ -53,7 +53,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
     }
   }, [cart, isHydrated]);
 
-  const addToCart = (item: Cake, quantity = 1, customization?: string) => {
+  const addToCart = (item: Cake, quantity = 1, customization?: string, flavor?: string) => {
     setCart(prev => {
       const found = prev.find(p => p.id === item.id && p.customization === customization);
       if (found) {
@@ -63,7 +63,16 @@ export function CartProvider({ children }: { children: ReactNode }) {
             : p
         );
       }
-      return [...prev, { ...item, quantity, customization }];
+      
+      // Create proper CartItem with required flavor field
+      const newCartItem: CartItem = {
+        ...item,
+        quantity,
+        customization,
+        flavor: flavor || item.flavors?.[0] || 'Default', // Ensure flavor is always present
+      };
+      
+      return [...prev, newCartItem];
     });
   };
 
@@ -84,7 +93,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       cart, 
       cartCount, 
       totalPrice, 
-      isHydrated, // ✅ ADD THIS
+      isHydrated,
       addToCart, 
       removeFromCart, 
       updateQuantity, 
