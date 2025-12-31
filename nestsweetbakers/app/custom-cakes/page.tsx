@@ -147,6 +147,21 @@ export default function CustomCakesPage() {
 
       const docRef = await addDoc(collection(db, 'customRequests'), requestData);
       const requestId = docRef.id;
+      // ✅ GUEST USER FLOW
+if (!user) {
+  showSuccess(`✅ Request submitted! Reference: ${requestId.slice(0, 8).toUpperCase()}`);
+  showInfo('Save this reference ID to track your request');
+  
+  // Redirect to track page
+  setTimeout(() => {
+    router.push(`/track-order?ref=REQ${requestId.slice(0, 8).toUpperCase()}`);
+  }, 3000);
+} else {
+  // Logged-in user flow
+  setTimeout(() => {
+    router.push('/orders');
+  }, 3000);
+}
 
       setUploadProgress('Notifying admin...');
 
