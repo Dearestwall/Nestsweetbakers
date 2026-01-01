@@ -1,12 +1,31 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { collection, getDocs, query, where, orderBy, limit, Timestamp } from 'firebase/firestore';
+import {
+  collection,
+  getDocs,
+  query,
+  orderBy,
+  limit,
+} from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { 
-  Package, ShoppingBag, Users, DollarSign, TrendingUp, Clock, 
-  ArrowUpRight, ArrowDownRight, Eye, Bell, Star, MessageSquare,
-  Calendar, Activity, ShoppingCart, Gift
+import {
+  Package,
+  ShoppingBag,
+  Users,
+  DollarSign,
+  TrendingUp,
+  Clock,
+  ArrowUpRight,
+  ArrowDownRight,
+  Eye,
+  Bell,
+  Star,
+  MessageSquare,
+  Calendar,
+  Activity,
+  ShoppingCart,
+  Gift,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useToast } from '@/context/ToastContext';
@@ -46,98 +65,167 @@ export default function AdminDashboard() {
   useEffect(() => {
     fetchDashboardData();
     showSuccess('🎉 Welcome back, Admin!');
-  }, [showSuccess]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const fetchDashboardData = async () => {
     try {
-      const [productsSnap, ordersSnap, requestsSnap, usersSnap, reviewsSnap] = await Promise.all([
-        getDocs(collection(db, 'products')),
-        getDocs(collection(db, 'orders')),
-        getDocs(collection(db, 'customRequests')),
-        getDocs(collection(db, 'users')),
-        getDocs(collection(db, 'reviews')),
-      ]);
+      const [productsSnap, ordersSnap, requestsSnap, usersSnap, reviewsSnap] =
+        await Promise.all([
+          getDocs(collection(db, 'products')),
+          getDocs(collection(db, 'orders')),
+          getDocs(collection(db, 'customRequests')),
+          getDocs(collection(db, 'users')),
+          getDocs(collection(db, 'reviews')),
+        ]);
 
-      const orders = ordersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      const products = productsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      const users = usersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      
-      // Calculate stats
-      const pendingCount = orders.filter((o: any) => o.status === 'pending').length;
-      const totalRevenue = orders.reduce((sum: number, o: any) => sum + (o.totalAmount || 0), 0);
-      
+      const orders = ordersSnap.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      const products = productsSnap.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      const users = usersSnap.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+
+      // Pending orders
+      const pendingCount = orders.filter(
+        (o: any) => o.status === 'pending'
+      ).length;
+
+      // Total revenue (use total, fall back to totalAmount)
+      const totalRevenue = orders.reduce((sum: number, o: any) => {
+        const amount = o.total ?? o.totalAmount ?? 0;
+        return sum + amount;
+      }, 0);
+
       // Today's stats
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      const todayOrders = orders.filter((o: any) => {
-        const orderDate = o.createdAt?.toDate ? o.createdAt.toDate() : new Date(o.createdAt);
-        return orderDate >= today;
+      const todayOrdersArr = orders.filter((o: any) => {
+        const createdAt = o.createdAt?.toDate
+          ? o.createdAt.toDate()
+          : new Date(o.createdAt);
+        return createdAt >= today;
       });
-      const todayRevenue = todayOrders.reduce((sum: number, o: any) => sum + (o.totalAmount || 0), 0);
-      
+      const todayRevenue = todayOrdersArr.reduce((sum: number, o: any) => {
+        const amount = o.total ?? o.totalAmount ?? 0;
+        return sum + amount;
+      }, 0);
+
       // New users (last 7 days)
       const lastWeek = new Date();
       lastWeek.setDate(lastWeek.getDate() - 7);
       const newUsers = users.filter((u: any) => {
-        const joinDate = u.createdAt?.toDate ? u.createdAt.toDate() : new Date(u.createdAt);
+        const joinDate = u.createdAt?.toDate
+          ? u.createdAt.toDate()
+          : new Date(u.createdAt);
         return joinDate >= lastWeek;
       }).length;
 
       // Average order value
-      const avgOrderValue = orders.length > 0 ? totalRevenue / orders.length : 0;
+      const avgOrderValue =
+        orders.length > 0 ? totalRevenue / orders.length : 0;
 
-      // Get recent orders
+      // Recent orders (normalized fields)
       const recentOrdersQuery = query(
         collection(db, 'orders'),
         orderBy('createdAt', 'desc'),
         limit(5)
       );
       const recentOrdersSnap = await getDocs(recentOrdersQuery);
-      const recent = recentOrdersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const recent = recentOrdersSnap.docs.map((doc) => {
+        const data = doc.data() as any;
+        const createdAt = data.createdAt?.toDate
+          ? data.createdAt.toDate()
+          : new Date(data.createdAt);
+        const displayName =
+          data.customerName ||
+          data.userName ||
+          data.customerInfo?.name ||
+          'Customer';
+        const displayEmail =
+          data.customerEmail ||
+          data.userEmail ||
+          data.customerInfo?.email ||
+          '';
+        const displayTotal = data.total ?? data.totalAmount ?? 0;
 
-      // Top products by order count
-      const productOrderCount = new Map();
-      orders.forEach((order: any) => {
-        if (order.cakeId) {
-          productOrderCount.set(
-            order.cakeId, 
-            (productOrderCount.get(order.cakeId) || 0) + 1
-          );
-        }
+        return {
+          id: doc.id,
+          ...data,
+          createdAt,
+          displayName,
+          displayEmail,
+          displayTotal,
+        };
       });
-      
+
+      // Top products by item count in orders.items[]
+      const productOrderCount = new Map<string, number>();
+      orders.forEach((order: any) => {
+        const items = order.items || [];
+        items.forEach((item: any) => {
+          if (item.cakeId) {
+            const qty = item.quantity ?? 1;
+            productOrderCount.set(
+              item.cakeId,
+              (productOrderCount.get(item.cakeId) || 0) + qty
+            );
+          }
+        });
+      });
+
       const topProds = products
         .map((p: any) => ({
           ...p,
-          orderCount: productOrderCount.get(p.id) || 0
+          orderCount: productOrderCount.get(p.id) || 0,
         }))
         .sort((a, b) => b.orderCount - a.orderCount)
         .slice(0, 5);
 
-      // Recent activities
+      // Recent activities (orders + reviews)
       const activities = [
         ...recent.slice(0, 3).map((order: any) => ({
           type: 'order',
-          message: `New order from ${order.customerName}`,
+          message: `New order from ${
+            order.displayName ||
+            order.customerName ||
+            order.userName ||
+            'Customer'
+          }`,
           time: order.createdAt,
           icon: ShoppingCart,
-          color: 'bg-green-100 text-green-600'
+          color: 'bg-green-100 text-green-600',
         })),
         ...reviewsSnap.docs.slice(0, 2).map((doc: any) => {
           const review = doc.data();
+          const time = review.createdAt;
           return {
             type: 'review',
-            message: `New review: ${review.rating}⭐ from ${review.userName}`,
-            time: review.createdAt,
+            message: `New review: ${review.rating}⭐ from ${
+              review.userName || 'Customer'
+            }`,
+            time,
             icon: Star,
-            color: 'bg-yellow-100 text-yellow-600'
+            color: 'bg-yellow-100 text-yellow-600',
           };
         }),
-      ].sort((a, b) => {
-        const timeA = a.time?.toDate ? a.time.toDate() : new Date(a.time);
-        const timeB = b.time?.toDate ? b.time.toDate() : new Date(b.time);
-        return timeB.getTime() - timeA.getTime();
-      }).slice(0, 5);
+      ]
+        .sort((a, b) => {
+          const timeA = a.time?.toDate
+            ? a.time.toDate()
+            : new Date(a.time);
+          const timeB = b.time?.toDate
+            ? b.time.toDate()
+            : new Date(b.time);
+          return timeB.getTime() - timeA.getTime();
+        })
+        .slice(0, 5);
 
       setStats({
         totalProducts: productsSnap.size,
@@ -146,7 +234,7 @@ export default function AdminDashboard() {
         totalRevenue: totalRevenue,
         customRequests: requestsSnap.size,
         totalUsers: usersSnap.size,
-        todayOrders: todayOrders.length,
+        todayOrders: todayOrdersArr.length,
         todayRevenue: todayRevenue,
         newUsers: newUsers,
         averageOrderValue: avgOrderValue,
@@ -166,7 +254,9 @@ export default function AdminDashboard() {
     {
       title: 'Total Revenue',
       value: `₹${stats.totalRevenue.toLocaleString()}`,
-      subtitle: `Avg: ₹${Math.round(stats.averageOrderValue).toLocaleString()}`,
+      subtitle: `Avg: ₹${Math.round(
+        stats.averageOrderValue
+      ).toLocaleString()}`,
       icon: DollarSign,
       color: 'from-purple-500 to-purple-600',
       trend: '+12.5%',
@@ -246,11 +336,14 @@ export default function AdminDashboard() {
     if (!timestamp) return 'Just now';
     const date = timestamp?.toDate ? timestamp.toDate() : new Date(timestamp);
     const now = new Date();
-    const diffInMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
-    
+    const diffInMinutes = Math.floor(
+      (now.getTime() - date.getTime()) / (1000 * 60)
+    );
+
     if (diffInMinutes < 1) return 'Just now';
     if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
-    if (diffInMinutes < 1440) return `${Math.floor(diffInMinutes / 60)}h ago`;
+    if (diffInMinutes < 1440)
+      return `${Math.floor(diffInMinutes / 60)}h ago`;
     return `${Math.floor(diffInMinutes / 1440)}d ago`;
   };
 
@@ -259,10 +352,12 @@ export default function AdminDashboard() {
       <div className="flex items-center justify-center min-h-[60vh]">
         <div className="text-center">
           <div className="relative w-24 h-24 mx-auto mb-6">
-            <div className="absolute inset-0 border-4 border-pink-200 rounded-full animate-ping"></div>
-            <div className="relative w-24 h-24 border-4 border-pink-600 border-t-transparent rounded-full animate-spin"></div>
+            <div className="absolute inset-0 border-4 border-pink-200 rounded-full animate-ping" />
+            <div className="relative w-24 h-24 border-4 border-pink-600 border-t-transparent rounded-full animate-spin" />
           </div>
-          <p className="text-gray-600 font-semibold text-lg">Loading dashboard...</p>
+          <p className="text-gray-600 font-semibold text-lg">
+            Loading dashboard...
+          </p>
         </div>
       </div>
     );
@@ -278,18 +373,23 @@ export default function AdminDashboard() {
           </h1>
           <p className="text-gray-600 mt-2 flex items-center gap-2">
             <Calendar size={16} />
-            {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+            {new Date().toLocaleDateString('en-US', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric',
+            })}
           </p>
         </div>
         <div className="flex gap-3">
-          <Link 
+          <Link
             href="/admin/orders?status=pending"
             className="px-6 py-3 bg-gradient-to-r from-yellow-500 to-orange-500 text-white rounded-xl font-semibold hover:shadow-lg transition-all transform hover:scale-105 flex items-center gap-2"
           >
             <Bell size={20} />
             {stats.pendingOrders} Pending
           </Link>
-          <Link 
+          <Link
             href="/admin/custom-requests"
             className="px-6 py-3 bg-gradient-to-r from-pink-600 to-purple-600 text-white rounded-xl font-semibold hover:shadow-lg transition-all transform hover:scale-105 flex items-center gap-2"
           >
@@ -309,37 +409,49 @@ export default function AdminDashboard() {
             style={{ animationDelay: `${index * 100}ms` }}
           >
             {/* Gradient Background Effect */}
-            <div className={`absolute inset-0 bg-gradient-to-br ${stat.color} opacity-0 group-hover:opacity-5 transition-opacity`}></div>
-            
+            <div
+              className={`absolute inset-0 bg-gradient-to-br ${stat.color} opacity-0 group-hover:opacity-5 transition-opacity`}
+            />
+
             <div className="relative z-10">
               <div className="flex items-start justify-between mb-4">
                 <div className="flex-1">
-                  <p className="text-gray-600 text-sm font-medium mb-1">{stat.title}</p>
+                  <p className="text-gray-600 text-sm font-medium mb-1">
+                    {stat.title}
+                  </p>
                   <p className="text-3xl md:text-4xl font-bold text-gray-800 mb-1">
                     {stat.value}
                   </p>
                   <p className="text-xs text-gray-500">{stat.subtitle}</p>
                 </div>
-                <div className={`w-14 h-14 bg-gradient-to-br ${stat.color} rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform`}>
+                <div
+                  className={`w-14 h-14 bg-gradient-to-br ${stat.color} rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform`}
+                >
                   <stat.icon className="text-white" size={24} />
                 </div>
               </div>
-              
+
               <div className="flex items-center gap-2">
                 {stat.trendUp ? (
                   <ArrowUpRight className="text-green-500" size={16} />
                 ) : (
                   <ArrowDownRight className="text-red-500" size={16} />
                 )}
-                <span className={`text-sm font-semibold ${stat.trendUp ? 'text-green-500' : 'text-red-500'}`}>
+                <span
+                  className={`text-sm font-semibold ${
+                    stat.trendUp ? 'text-green-500' : 'text-red-500'
+                  }`}
+                >
                   {stat.trend}
                 </span>
-                <span className="text-gray-400 text-sm">vs last month</span>
+                <span className="text-gray-400 text-sm">
+                  vs last month
+                </span>
               </div>
             </div>
 
             {/* Hover Effect */}
-            <div className="absolute bottom-0 right-0 w-20 h-20 bg-gradient-to-br from-transparent to-gray-100 rounded-tl-full opacity-0 group-hover:opacity-100 transition-opacity"></div>
+            <div className="absolute bottom-0 right-0 w-20 h-20 bg-gradient-to-br from-transparent to-gray-100 rounded-tl-full opacity-0 group-hover:opacity-100 transition-opacity" />
           </Link>
         ))}
       </div>
@@ -354,19 +466,32 @@ export default function AdminDashboard() {
                 <ShoppingBag className="text-white" size={20} />
               </div>
               <div>
-                <h2 className="text-xl font-bold text-gray-800">Recent Orders</h2>
-                <p className="text-sm text-gray-600">Latest customer orders</p>
+                <h2 className="text-xl font-bold text-gray-800">
+                  Recent Orders
+                </h2>
+                <p className="text-sm text-gray-600">
+                  Latest customer orders
+                </p>
               </div>
             </div>
-            <Link href="/admin/orders" className="text-pink-600 hover:text-pink-700 font-semibold text-sm flex items-center gap-1 group">
+            <Link
+              href="/admin/orders"
+              className="text-pink-600 hover:text-pink-700 font-semibold text-sm flex items-center gap-1 group"
+            >
               View All
-              <ArrowUpRight className="group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" size={16} />
+              <ArrowUpRight
+                className="group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform"
+                size={16}
+              />
             </Link>
           </div>
 
           {recentOrders.length === 0 ? (
             <div className="text-center py-12">
-              <ShoppingBag className="mx-auto text-gray-300 mb-4" size={48} />
+              <ShoppingBag
+                className="mx-auto text-gray-300 mb-4"
+                size={48}
+              />
               <p className="text-gray-500">No recent orders</p>
             </div>
           ) : (
@@ -382,14 +507,28 @@ export default function AdminDashboard() {
                       <Package className="text-pink-600" size={24} />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-gray-800 truncate">{order.customerName}</p>
-                      <p className="text-sm text-gray-600 truncate">{order.customerEmail}</p>
-                      <p className="text-xs text-gray-500">{formatTime(order.createdAt)}</p>
+                      <p className="font-semibold text-gray-800 truncate">
+                        {order.displayName}
+                      </p>
+                      {order.displayEmail && (
+                        <p className="text-sm text-gray-600 truncate">
+                          {order.displayEmail}
+                        </p>
+                      )}
+                      <p className="text-xs text-gray-500">
+                        {formatTime(order.createdAt)}
+                      </p>
                     </div>
                   </div>
                   <div className="text-right flex-shrink-0 ml-4">
-                    <p className="font-bold text-gray-800 text-lg mb-1">₹{order.totalAmount?.toLocaleString()}</p>
-                    <span className={`text-xs px-3 py-1 rounded-full font-medium ${getStatusColor(order.status)}`}>
+                    <p className="font-bold text-gray-800 text-lg mb-1">
+                      ₹{order.displayTotal.toLocaleString()}
+                    </p>
+                    <span
+                      className={`text-xs px-3 py-1 rounded-full font-medium ${getStatusColor(
+                        order.status
+                      )}`}
+                    >
                       {order.status}
                     </span>
                   </div>
@@ -406,20 +545,31 @@ export default function AdminDashboard() {
               <Activity className="text-white" size={20} />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-gray-800">Activity Feed</h2>
+              <h2 className="text-xl font-bold text-gray-800">
+                Activity Feed
+              </h2>
               <p className="text-sm text-gray-600">Recent updates</p>
             </div>
           </div>
 
           <div className="space-y-4">
             {recentActivities.map((activity: any, index: number) => (
-              <div key={index} className="flex items-start gap-3 group">
-                <div className={`w-10 h-10 ${activity.color} rounded-lg flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform`}>
+              <div
+                key={index}
+                className="flex items-start gap-3 group"
+              >
+                <div
+                  className={`w-10 h-10 ${activity.color} rounded-lg flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform`}
+                >
                   <activity.icon size={20} />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-800">{activity.message}</p>
-                  <p className="text-xs text-gray-500 mt-1">{formatTime(activity.time)}</p>
+                  <p className="text-sm font-medium text-gray-800">
+                    {activity.message}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {formatTime(activity.time)}
+                  </p>
                 </div>
               </div>
             ))}
@@ -435,19 +585,32 @@ export default function AdminDashboard() {
               <TrendingUp className="text-white" size={20} />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-gray-800">Top Performing Products</h2>
-              <p className="text-sm text-gray-600">Best sellers this month</p>
+              <h2 className="text-xl font-bold text-gray-800">
+                Top Performing Products
+              </h2>
+              <p className="text-sm text-gray-600">
+                Best sellers this month
+              </p>
             </div>
           </div>
-          <Link href="/admin/products" className="text-pink-600 hover:text-pink-700 font-semibold text-sm flex items-center gap-1 group">
+          <Link
+            href="/admin/products"
+            className="text-pink-600 hover:text-pink-700 font-semibold text-sm flex items-center gap-1 group"
+          >
             View All
-            <ArrowUpRight className="group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" size={16} />
+            <ArrowUpRight
+              className="group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform"
+              size={16}
+            />
           </Link>
         </div>
 
         {topProducts.length === 0 ? (
           <div className="text-center py-12">
-            <Package className="mx-auto text-gray-300 mb-4" size={48} />
+            <Package
+              className="mx-auto text-gray-300 mb-4"
+              size={48}
+            />
             <p className="text-gray-500">No product data available</p>
           </div>
         ) : (
@@ -465,18 +628,24 @@ export default function AdminDashboard() {
                   <div className="w-full aspect-square bg-white rounded-lg overflow-hidden mb-3">
                     {product.imageUrl && (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img 
-                        src={product.imageUrl} 
+                      <img
+                        src={product.imageUrl}
                         alt={product.name}
                         className="w-full h-full object-cover group-hover:scale-110 transition-transform"
                       />
                     )}
                   </div>
                 </div>
-                <h3 className="font-semibold text-gray-800 text-sm mb-1 line-clamp-2">{product.name}</h3>
+                <h3 className="font-semibold text-gray-800 text-sm mb-1 line-clamp-2">
+                  {product.name}
+                </h3>
                 <div className="flex items-center justify-between">
-                  <p className="text-xs text-gray-600">{product.orderCount} orders</p>
-                  <p className="text-sm font-bold text-pink-600">₹{product.basePrice}</p>
+                  <p className="text-xs text-gray-600">
+                    {product.orderCount} orders
+                  </p>
+                  <p className="text-sm font-bold text-pink-600">
+                    ₹{product.basePrice}
+                  </p>
                 </div>
               </Link>
             ))}
@@ -492,28 +661,40 @@ export default function AdminDashboard() {
             href="/admin/products/new"
             className="bg-white/20 backdrop-blur-sm rounded-xl p-4 hover:bg-white/30 transition-all text-center group"
           >
-            <Package className="mx-auto mb-2 group-hover:scale-110 transition-transform" size={32} />
+            <Package
+              className="mx-auto mb-2 group-hover:scale-110 transition-transform"
+              size={32}
+            />
             <p className="font-semibold text-sm">Add Product</p>
           </Link>
           <Link
             href="/admin/orders"
             className="bg-white/20 backdrop-blur-sm rounded-xl p-4 hover:bg-white/30 transition-all text-center group"
           >
-            <Eye className="mx-auto mb-2 group-hover:scale-110 transition-transform" size={32} />
+            <Eye
+              className="mx-auto mb-2 group-hover:scale-110 transition-transform"
+              size={32}
+            />
             <p className="font-semibold text-sm">View Orders</p>
           </Link>
           <Link
             href="/admin/reviews"
             className="bg-white/20 backdrop-blur-sm rounded-xl p-4 hover:bg-white/30 transition-all text-center group"
           >
-            <MessageSquare className="mx-auto mb-2 group-hover:scale-110 transition-transform" size={32} />
+            <MessageSquare
+              className="mx-auto mb-2 group-hover:scale-110 transition-transform"
+              size={32}
+            />
             <p className="font-semibold text-sm">Reviews</p>
           </Link>
           <Link
             href="/admin/settings"
             className="bg-white/20 backdrop-blur-sm rounded-xl p-4 hover:bg-white/30 transition-all text-center group"
           >
-            <Activity className="mx-auto mb-2 group-hover:scale-110 transition-transform" size={32} />
+            <Activity
+              className="mx-auto mb-2 group-hover:scale-110 transition-transform"
+              size={32}
+            />
             <p className="font-semibold text-sm">Settings</p>
           </Link>
         </div>
@@ -530,7 +711,7 @@ export default function AdminDashboard() {
             transform: translateY(0);
           }
         }
-        
+
         .animate-fade-in {
           animation: fade-in 0.6s ease-out;
         }
