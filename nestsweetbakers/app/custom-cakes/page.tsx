@@ -7,15 +7,16 @@ import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { useSettings } from '@/hooks/useSettings';
 import { uploadMultipleToCloudinary } from '@/lib/cloudinary';
-import { sendEmailNotification } from '@/lib/emailService';
-import { sendWhatsAppNotification } from '@/lib/whatsappService';
 import { 
   Cake, Sparkles, Upload, X, Loader2, Phone, Mail, MapPin,
   Calendar, DollarSign, Users, Layers, Info, Clock, AlertCircle,
-  MessageCircle, Send, CheckCircle
+  MessageCircle, Send, CheckCircle, LogIn, ArrowRight, FileText,
+  Camera, Gift, Zap, Shield,
+  User
 } from 'lucide-react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 
 export default function CustomCakesPage() {
   const { user } = useAuth();
@@ -47,7 +48,7 @@ export default function CustomCakesPage() {
   const [loading, setLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
   const [currentStep, setCurrentStep] = useState(1);
-  const [notificationMethod, setNotificationMethod] = useState<'email' | 'whatsapp' | 'both'>('both');
+  const [requestRef, setRequestRef] = useState('');
 
   useEffect(() => {
     if (user) {
@@ -108,15 +109,13 @@ export default function CustomCakesPage() {
     return true;
   };
 
+  const generateRequestRef = () => {
+    return 'REQ' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substr(2, 5).toUpperCase();
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!user) {
-      showError('Please sign in to submit a custom cake request');
-      router.push('/login');
-      return;
-    }
-
     if (!validateForm()) {
       return;
     }
@@ -127,6 +126,7 @@ export default function CustomCakesPage() {
     try {
       let imageUrls: string[] = [];
 
+      // Upload images if any
       if (referenceImages.length > 0) {
         setUploadProgress(`Uploading ${referenceImages.length} image(s)...`);
         imageUrls = await uploadMultipleToCloudinary(referenceImages);
@@ -134,80 +134,59 @@ export default function CustomCakesPage() {
 
       setUploadProgress('Submitting your custom cake request...');
 
+      const refCode = generateRequestRef();
+      const isGuest = !user;
+
       const requestData = {
         ...formData,
-        userId: user.uid,
-        userEmail: user.email,
-        userName: user.displayName || formData.name,
+        requestRef: refCode,
+        userId: user?.uid || null,
+        userEmail: user?.email || formData.email || null,
+        userName: user?.displayName || formData.name,
+        isGuest,
         referenceImages: imageUrls,
         status: 'pending',
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       };
 
-      const docRef = await addDoc(collection(db, 'customRequests'), requestData);
-      const requestId = docRef.id;
-      // ✅ GUEST USER FLOW
-if (!user) {
-  showSuccess(`✅ Request submitted! Reference: ${requestId.slice(0, 8).toUpperCase()}`);
-  showInfo('Save this reference ID to track your request');
-  
-  // Redirect to track page
-  setTimeout(() => {
-    router.push(`/track-order?ref=REQ${requestId.slice(0, 8).toUpperCase()}`);
-  }, 3000);
-} else {
-  // Logged-in user flow
-  setTimeout(() => {
-    router.push('/orders');
-  }, 3000);
-}
+      // Submit to API
+      const response = await fetch('/api/custom-cakes/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestData),
+      });
 
-      setUploadProgress('Notifying admin...');
+      const result = await response.json();
 
-      // Send notifications based on user selection
-      const requestWithId = { ...formData, referenceImages: imageUrls, requestId };
-
-      if (notificationMethod === 'email' || notificationMethod === 'both') {
-        await sendEmailNotification(requestWithId, settings);
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to submit request');
       }
 
-      if (notificationMethod === 'whatsapp' || notificationMethod === 'both') {
-        // Small delay to ensure Firestore write completes
-        setTimeout(() => {
-          sendWhatsAppNotification(requestWithId, settings);
-        }, 1000);
+      // ✅ Store request reference in localStorage for guest users
+      if (isGuest) {
+        const guestRequests = JSON.parse(localStorage.getItem('guestRequests') || '[]');
+        guestRequests.push({
+          requestRef: refCode,
+          requestId: result.requestId,
+          customerEmail: formData.email,
+          customerPhone: formData.phone,
+          timestamp: Date.now(),
+        });
+        localStorage.setItem('guestRequests', JSON.stringify(guestRequests));
       }
 
-      showSuccess('Custom cake request submitted successfully! 🎉');
+      setRequestRef(refCode);
+      showSuccess('🎉 Custom cake request submitted successfully!');
       setSubmitted(true);
 
-      // Reset form
-      setFormData({
-        name: user.displayName || '',
-        phone: '',
-        email: user.email || '',
-        deliveryAddress: '',
-        occasion: '',
-        flavor: '',
-        size: '',
-        servings: '',
-        tier: '1',
-        eggless: false,
-        design: '',
-        budget: '',
-        deliveryDate: '',
-        urgency: 'normal',
-        message: '',
-      });
-      setReferenceImages([]);
-      setImagePreviews([]);
-      setCurrentStep(1);
-
-      // Redirect after showing success
-      setTimeout(() => {
-        router.push('/orders');
-      }, 3000);
+      // ✅ Open WhatsApp for ALL users
+      if (result.whatsappUrl) {
+        showInfo('Opening WhatsApp to send your design details...');
+        setTimeout(() => {
+          window.open(result.whatsappUrl, '_blank');
+        }, 1500);
+      }
 
     } catch (error) {
       console.error('Error submitting custom cake request:', error);
@@ -220,7 +199,7 @@ if (!user) {
 
   if (settingsLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-white">
         <Loader2 className="animate-spin text-pink-600" size={48} />
       </div>
     );
@@ -229,59 +208,146 @@ if (!user) {
   if (submitted) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-pink-50 via-purple-50 to-white p-4">
-        <div className="bg-white rounded-3xl shadow-2xl p-8 md:p-12 max-w-lg text-center animate-scale-in">
-          <div className="w-24 h-24 bg-gradient-to-r from-green-500 to-emerald-500 rounded-full flex items-center justify-center mx-auto mb-6 animate-bounce">
-            <CheckCircle className="text-white" size={48} />
+        <div className="bg-white rounded-3xl shadow-2xl p-8 md:p-12 max-w-2xl text-center animate-scale-in">
+          {/* Success Animation */}
+          <div className="relative mb-8">
+            <div className="w-28 h-28 bg-gradient-to-r from-green-500 to-emerald-500 rounded-full flex items-center justify-center mx-auto animate-bounce">
+              <CheckCircle className="text-white" size={56} />
+            </div>
+            <div className="absolute -top-4 -right-4 w-20 h-20 bg-yellow-400 rounded-full animate-ping opacity-20"></div>
+            <div className="absolute -bottom-4 -left-4 w-16 h-16 bg-pink-400 rounded-full animate-ping opacity-20 delay-100"></div>
           </div>
-          <h2 className="text-4xl font-bold mb-4 bg-gradient-to-r from-pink-600 to-purple-600 bg-clip-text text-transparent">
-            Request Received!
+
+          <h2 className="text-3xl md:text-4xl font-bold mb-4 bg-gradient-to-r from-pink-600 to-purple-600 bg-clip-text text-transparent">
+            Request Received! 🎉
           </h2>
-          <p className="text-gray-600 text-lg mb-4">
+          <p className="text-gray-600 text-base md:text-lg mb-6">
             Thank you for your custom cake request! Our cake artists will review your design and contact you soon.
           </p>
+
+          {/* Request Reference */}
+          <div className="bg-gradient-to-r from-yellow-50 to-orange-50 border-2 border-yellow-300 rounded-2xl p-6 mb-8">
+            <div className="flex items-center justify-center gap-3 mb-3">
+              <FileText className="text-orange-600" size={24} />
+              <h3 className="font-bold text-lg text-gray-800">Your Reference Code</h3>
+            </div>
+            <div className="bg-white rounded-xl p-4 border-2 border-dashed border-orange-300">
+              <p className="text-3xl font-bold text-orange-600 font-mono tracking-wider">
+                {requestRef}
+              </p>
+            </div>
+            <p className="text-xs text-gray-600 mt-3">
+              {user ? '✓ Saved to your account' : '⚠️ Save this code to track your request'}
+            </p>
+          </div>
           
-          <div className="bg-gradient-to-r from-pink-50 to-purple-50 rounded-xl p-6 mb-6">
-            <h3 className="font-bold text-gray-800 mb-3">What happens next?</h3>
-            <div className="space-y-2 text-sm text-gray-600 text-left">
-              <div className="flex items-start gap-2">
-                <CheckCircle className="text-green-500 flex-shrink-0 mt-0.5" size={16} />
-                <span>We&apos;ll review your design requirements</span>
+          {/* ✅ Guest User Info */}
+          {!user && (
+            <div className="bg-blue-50 border-2 border-blue-300 rounded-2xl p-5 mb-6 text-left">
+              <div className="flex items-start gap-3">
+                <Info className="text-blue-600 flex-shrink-0 mt-1" size={20} />
+                <div>
+                  <h4 className="font-bold text-blue-800 mb-2">Guest Request</h4>
+                  <p className="text-sm text-blue-700 mb-3">
+                    Sign in to manage all your requests in one place and get automatic updates!
+                  </p>
+                  <Link
+                    href="/login"
+                    className="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition font-semibold text-sm shadow-md"
+                  >
+                    <LogIn size={16} />
+                    Sign In or Create Account
+                  </Link>
+                </div>
               </div>
-              <div className="flex items-start gap-2">
-                <CheckCircle className="text-green-500 flex-shrink-0 mt-0.5" size={16} />
-                <span>Contact you within 24 hours via {notificationMethod === 'email' ? 'email' : notificationMethod === 'whatsapp' ? 'WhatsApp' : 'email/WhatsApp'}</span>
+            </div>
+          )}
+
+          {/* What's Next */}
+          <div className="bg-gradient-to-r from-pink-50 to-purple-50 rounded-2xl p-6 mb-6 text-left">
+            <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
+              <Clock className="text-pink-600" size={20} />
+              What happens next?
+            </h3>
+            <div className="space-y-3">
+              <div className="flex items-start gap-3">
+                <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <CheckCircle className="text-white" size={14} />
+                </div>
+                <div>
+                  <p className="font-semibold text-sm text-gray-800">Design Review</p>
+                  <p className="text-xs text-gray-600">We&apos;ll review your design requirements carefully</p>
+                </div>
               </div>
-              <div className="flex items-start gap-2">
-                <CheckCircle className="text-green-500 flex-shrink-0 mt-0.5" size={16} />
-                <span>Provide detailed quote and timeline</span>
+              <div className="flex items-start gap-3">
+                <div className="w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <MessageCircle className="text-white" size={14} />
+                </div>
+                <div>
+                  <p className="font-semibold text-sm text-gray-800">Contact Within 24 Hours</p>
+                  <p className="text-xs text-gray-600">We&apos;ll reach you via WhatsApp or phone</p>
+                </div>
               </div>
-              <div className="flex items-start gap-2">
-                <CheckCircle className="text-green-500 flex-shrink-0 mt-0.5" size={16} />
-                <span>Finalize design and confirm order</span>
+              <div className="flex items-start gap-3">
+                <div className="w-6 h-6 bg-purple-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <DollarSign className="text-white" size={14} />
+                </div>
+                <div>
+                  <p className="font-semibold text-sm text-gray-800">Quote & Timeline</p>
+                  <p className="text-xs text-gray-600">Receive detailed pricing and delivery timeline</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3">
+                <div className="w-6 h-6 bg-pink-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <Cake className="text-white" size={14} />
+                </div>
+                <div>
+                  <p className="font-semibold text-sm text-gray-800">Finalize & Create</p>
+                  <p className="text-xs text-gray-600">Confirm design and we&apos;ll bake your dream cake!</p>
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-3">
+          {/* Action Buttons */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
             <a
               href={`tel:${settings.phone}`}
-              className="flex items-center justify-center gap-2 bg-green-500 text-white px-6 py-3 rounded-xl font-semibold hover:bg-green-600 transition"
+              className="flex items-center justify-center gap-2 bg-green-500 text-white px-6 py-3 rounded-xl font-semibold hover:bg-green-600 transition shadow-lg"
             >
               <Phone size={20} />
               Call Us
             </a>
             <a
-              href={`https://wa.me/${settings.whatsapp.replace(/[^0-9]/g, '')}`}
+              href={`https://wa.me/${settings.whatsapp?.replace(/[^0-9]/g, '')}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center justify-center gap-2 bg-green-600 text-white px-6 py-3 rounded-xl font-semibold hover:bg-green-700 transition"
+              className="flex items-center justify-center gap-2 bg-gradient-to-r from-green-600 to-green-700 text-white px-6 py-3 rounded-xl font-semibold hover:from-green-700 hover:to-green-800 transition shadow-lg"
             >
               <MessageCircle size={20} />
               WhatsApp
             </a>
           </div>
 
-          <p className="text-sm text-gray-500 mt-6">Redirecting to your orders...</p>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <Link
+              href="/cakes"
+              className="inline-flex items-center justify-center gap-2 bg-gray-100 text-gray-700 px-6 py-3 rounded-xl font-semibold hover:bg-gray-200 transition"
+            >
+              Browse Ready Cakes
+            </Link>
+            <Link
+              href={user ? '/orders' : '/track-order'}
+              className="inline-flex items-center justify-center gap-2 bg-gradient-to-r from-pink-600 to-purple-600 text-white px-6 py-3 rounded-xl font-semibold hover:from-pink-700 hover:to-purple-700 transition shadow-lg"
+            >
+              {user ? 'View My Requests' : 'Track Request'}
+              <ArrowRight size={18} />
+            </Link>
+          </div>
+
+          <p className="text-xs text-gray-500 mt-6">
+            {user ? 'Check your email for confirmation' : `Reference: ${requestRef}`}
+          </p>
         </div>
       </div>
     );
@@ -298,11 +364,11 @@ if (!user) {
         <div className="text-center mb-8 md:mb-12 animate-fade-in">
           <div className="flex items-center justify-center gap-3 mb-4">
             <Cake className="text-pink-600" size={48} />
-            <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold bg-gradient-to-r from-pink-600 to-purple-600 bg-clip-text text-transparent">
+            <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold bg-gradient-to-r from-pink-600 to-purple-600 bg-clip-text text-transparent">
               Design Your Dream Cake
             </h1>
           </div>
-          <p className="text-gray-600 text-lg md:text-xl max-w-3xl mx-auto mb-6">
+          <p className="text-gray-600 text-base md:text-lg max-w-3xl mx-auto mb-6">
             Tell us about your perfect cake and we&apos;ll bring it to life! Our expert cake artists are ready to create something magical for your special occasion.
           </p>
           
@@ -313,7 +379,7 @@ if (!user) {
               <span className="font-medium">{settings.phone}</span>
             </a>
             <span className="text-gray-300">|</span>
-            <a href={`https://wa.me/${settings.whatsapp.replace(/[^0-9]/g, '')}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-gray-600 hover:text-green-600 transition">
+            <a href={`https://wa.me/${settings.whatsapp?.replace(/[^0-9]/g, '')}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-gray-600 hover:text-green-600 transition">
               <MessageCircle size={16} />
               <span className="font-medium">WhatsApp</span>
             </a>
@@ -325,23 +391,51 @@ if (!user) {
           </div>
         </div>
 
+        {/* ✅ Guest User Banner */}
+        {!user && (
+          <div className="bg-gradient-to-r from-blue-500 to-purple-500 rounded-2xl p-5 md:p-6 text-white shadow-lg mb-8 animate-fade-in">
+            <div className="flex items-start gap-3">
+              <Info className="flex-shrink-0 mt-0.5" size={24} />
+              <div className="flex-1">
+                <h3 className="font-bold text-lg md:text-xl mb-2 flex items-center gap-2">
+                  Submit as Guest or Sign In
+                </h3>
+                <p className="text-sm md:text-base opacity-90 mb-4">
+                  You can submit your request without signing in. We&apos;ll contact you via phone/email. Or sign in to track all your requests in one place!
+                </p>
+                <Link
+                  href="/login"
+                  className="inline-flex items-center gap-2 bg-white text-purple-600 px-5 py-2.5 rounded-lg hover:bg-gray-100 transition font-semibold text-sm shadow-md"
+                >
+                  <LogIn size={18} />
+                  Sign In to Your Account
+                </Link>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Progress Steps */}
         <div className="mb-8 animate-fade-in" style={{ animationDelay: '100ms' }}>
           <div className="flex items-center justify-between max-w-3xl mx-auto">
             {[
-              { num: 1, label: 'Contact' },
-              { num: 2, label: 'Cake Details' },
-              { num: 3, label: 'Design' },
-              { num: 4, label: 'Review' }
+              { num: 1, label: 'Contact', icon: User },
+              { num: 2, label: 'Details', icon: Cake },
+              { num: 3, label: 'Design', icon: Sparkles },
+              { num: 4, label: 'Review', icon: CheckCircle }
             ].map((step, idx) => (
               <div key={step.num} className="flex items-center">
                 <div className="flex flex-col items-center">
-                  <div className={`w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center font-bold transition-all ${
+                  <div className={`w-12 h-12 md:w-14 md:h-14 rounded-full flex items-center justify-center font-bold transition-all ${
                     currentStep >= step.num 
                       ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white scale-110 shadow-lg' 
                       : 'bg-gray-200 text-gray-500'
                   }`}>
-                    {step.num}
+                    {currentStep > step.num ? (
+                      <CheckCircle size={24} />
+                    ) : (
+                      <step.icon size={24} />
+                    )}
                   </div>
                   <span className={`text-xs md:text-sm mt-2 font-medium ${
                     currentStep >= step.num ? 'text-pink-600' : 'text-gray-500'
@@ -360,21 +454,22 @@ if (!user) {
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="bg-white rounded-3xl shadow-2xl p-6 md:p-10 animate-fade-in" style={{ animationDelay: '200ms' }}>
-          <div className="space-y-8">
-            {/* Step 1: Contact Information */}
-            <div className={currentStep === 1 ? '' : 'hidden'}>
-              <div className="flex items-center gap-3 mb-6">
-                <div className="w-12 h-12 bg-gradient-to-r from-pink-600 to-purple-600 text-white rounded-full flex items-center justify-center font-bold text-lg">
+        <form onSubmit={handleSubmit} className="bg-white rounded-3xl shadow-2xl p-6 md:p-10 animate-fade-in border border-gray-100" style={{ animationDelay: '200ms' }}>
+          
+          {/* STEP 1: Contact Information */}
+          {currentStep === 1 && (
+            <div className="space-y-6 animate-fade-in">
+              <div className="flex items-center gap-3 mb-6 pb-4 border-b-2 border-pink-200">
+                <div className="w-12 h-12 bg-gradient-to-r from-pink-600 to-purple-600 text-white rounded-full flex items-center justify-center font-bold text-lg shadow-lg">
                   1
                 </div>
                 <div>
                   <h2 className="text-2xl md:text-3xl font-bold text-gray-800">Contact Information</h2>
-                  <p className="text-gray-600">How can we reach you?</p>
+                  <p className="text-gray-600 text-sm">How can we reach you?</p>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">
                     Your Name *
@@ -443,29 +538,30 @@ if (!user) {
                     showError('Please fill in all required fields');
                   }
                 }}
-                className="mt-6 w-full md:w-auto px-8 py-4 bg-gradient-to-r from-pink-600 to-purple-600 text-white rounded-xl font-bold hover:from-pink-700 hover:to-purple-700 transition-all shadow-lg"
+                className="w-full md:w-auto px-8 py-4 bg-gradient-to-r from-pink-600 to-purple-600 text-white rounded-xl font-bold hover:from-pink-700 hover:to-purple-700 transition-all shadow-lg flex items-center justify-center gap-2"
               >
-                Continue to Cake Details →
+                Continue to Cake Details
+                <ArrowRight size={20} />
               </button>
             </div>
+          )}
 
-            {/* Step 2: Cake Details */}
-            <div className={currentStep === 2 ? '' : 'hidden'}>
-              <div className="flex items-center gap-3 mb-6">
-                <div className="w-12 h-12 bg-gradient-to-r from-pink-600 to-purple-600 text-white rounded-full flex items-center justify-center font-bold text-lg">
+          {/* STEP 2: Cake Details */}
+          {currentStep === 2 && (
+            <div className="space-y-6 animate-fade-in">
+              <div className="flex items-center gap-3 mb-6 pb-4 border-b-2 border-pink-200">
+                <div className="w-12 h-12 bg-gradient-to-r from-pink-600 to-purple-600 text-white rounded-full flex items-center justify-center font-bold text-lg shadow-lg">
                   2
                 </div>
                 <div>
                   <h2 className="text-2xl md:text-3xl font-bold text-gray-800">Cake Details</h2>
-                  <p className="text-gray-600">Tell us about your cake</p>
+                  <p className="text-gray-600 text-sm">Tell us about your cake</p>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Occasion *
-                  </label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Occasion *</label>
                   <select
                     value={formData.occasion}
                     onChange={(e) => setFormData({...formData, occasion: e.target.value})}
@@ -485,9 +581,7 @@ if (!user) {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Flavor *
-                  </label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Flavor *</label>
                   <input
                     type="text"
                     placeholder="e.g., Chocolate, Vanilla, Red Velvet"
@@ -499,9 +593,7 @@ if (!user) {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Size/Weight *
-                  </label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Size/Weight *</label>
                   <input
                     type="text"
                     placeholder="e.g., 2kg, 5 pounds"
@@ -591,7 +683,7 @@ if (!user) {
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="flex items-center gap-3 cursor-pointer">
+                  <label className="flex items-center gap-3 cursor-pointer p-4 border-2 border-gray-200 rounded-xl hover:border-pink-300 transition">
                     <input
                       type="checkbox"
                       checked={formData.eggless}
@@ -603,7 +695,7 @@ if (!user) {
                 </div>
               </div>
 
-              <div className="flex gap-4 mt-6">
+              <div className="flex gap-4">
                 <button
                   type="button"
                   onClick={() => setCurrentStep(1)}
@@ -620,22 +712,25 @@ if (!user) {
                       showError('Please fill in all required fields');
                     }
                   }}
-                  className="flex-1 px-8 py-4 bg-gradient-to-r from-pink-600 to-purple-600 text-white rounded-xl font-bold hover:from-pink-700 hover:to-purple-700 transition-all shadow-lg"
+                  className="flex-1 px-8 py-4 bg-gradient-to-r from-pink-600 to-purple-600 text-white rounded-xl font-bold hover:from-pink-700 hover:to-purple-700 transition-all shadow-lg flex items-center justify-center gap-2"
                 >
-                  Continue to Design →
+                  Continue to Design
+                  <ArrowRight size={20} />
                 </button>
               </div>
             </div>
+          )}
 
-            {/* Step 3: Design & Images */}
-            <div className={currentStep === 3 ? '' : 'hidden'}>
-              <div className="flex items-center gap-3 mb-6">
-                <div className="w-12 h-12 bg-gradient-to-r from-pink-600 to-purple-600 text-white rounded-full flex items-center justify-center font-bold text-lg">
+          {/* STEP 3: Design & Images */}
+          {currentStep === 3 && (
+            <div className="space-y-6 animate-fade-in">
+              <div className="flex items-center gap-3 mb-6 pb-4 border-b-2 border-pink-200">
+                <div className="w-12 h-12 bg-gradient-to-r from-pink-600 to-purple-600 text-white rounded-full flex items-center justify-center font-bold text-lg shadow-lg">
                   3
                 </div>
                 <div>
                   <h2 className="text-2xl md:text-3xl font-bold text-gray-800">Design Your Cake</h2>
-                  <p className="text-gray-600">Describe your vision and add references</p>
+                  <p className="text-gray-600 text-sm">Describe your vision and add references</p>
                 </div>
               </div>
 
@@ -662,7 +757,8 @@ Examples:
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                    <Camera size={16} />
                     Reference Images (Optional - Max 5)
                   </label>
                   
@@ -730,7 +826,7 @@ Examples:
                 </div>
               </div>
 
-              <div className="flex gap-4 mt-6">
+              <div className="flex gap-4">
                 <button
                   type="button"
                   onClick={() => setCurrentStep(2)}
@@ -747,22 +843,25 @@ Examples:
                       showError('Please describe your cake design');
                     }
                   }}
-                  className="flex-1 px-8 py-4 bg-gradient-to-r from-pink-600 to-purple-600 text-white rounded-xl font-bold hover:from-pink-700 hover:to-purple-700 transition-all shadow-lg"
+                  className="flex-1 px-8 py-4 bg-gradient-to-r from-pink-600 to-purple-600 text-white rounded-xl font-bold hover:from-pink-700 hover:to-purple-700 transition-all shadow-lg flex items-center justify-center gap-2"
                 >
-                  Review & Submit →
+                  Review & Submit
+                  <ArrowRight size={20} />
                 </button>
               </div>
             </div>
+          )}
 
-            {/* Step 4: Review & Submit */}
-            <div className={currentStep === 4 ? '' : 'hidden'}>
-              <div className="flex items-center gap-3 mb-6">
-                <div className="w-12 h-12 bg-gradient-to-r from-pink-600 to-purple-600 text-white rounded-full flex items-center justify-center font-bold text-lg">
+          {/* STEP 4: Review & Submit */}
+          {currentStep === 4 && (
+            <div className="space-y-6 animate-fade-in">
+              <div className="flex items-center gap-3 mb-6 pb-4 border-b-2 border-pink-200">
+                <div className="w-12 h-12 bg-gradient-to-r from-pink-600 to-purple-600 text-white rounded-full flex items-center justify-center font-bold text-lg shadow-lg">
                   4
                 </div>
                 <div>
                   <h2 className="text-2xl md:text-3xl font-bold text-gray-800">Review Your Request</h2>
-                  <p className="text-gray-600">Please verify all details before submitting</p>
+                  <p className="text-gray-600 text-sm">Please verify all details before submitting</p>
                 </div>
               </div>
 
@@ -816,55 +915,9 @@ Examples:
                     </>
                   )}
                 </div>
-
-                {/* Notification Method */}
-                <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl p-6 border-2 border-green-200">
-                  <h3 className="font-bold text-lg mb-3 text-gray-800 flex items-center gap-2">
-                    <Send size={20} />
-                    How should we notify the admin?
-                  </h3>
-                  <div className="space-y-2">
-                    <label className="flex items-center gap-3 cursor-pointer p-3 rounded-lg hover:bg-white transition">
-                      <input
-                        type="radio"
-                        name="notification"
-                        value="both"
-                        checked={notificationMethod === 'both'}
-                        onChange={(e) => setNotificationMethod(e.target.value as any)}
-                        className="w-5 h-5 text-pink-600"
-                      />
-                      <div>
-                        <span className="font-semibold">Email + WhatsApp (Recommended)</span>
-                        <p className="text-xs text-gray-600">Get fastest response</p>
-                      </div>
-                    </label>
-                    <label className="flex items-center gap-3 cursor-pointer p-3 rounded-lg hover:bg-white transition">
-                      <input
-                        type="radio"
-                        name="notification"
-                        value="email"
-                        checked={notificationMethod === 'email'}
-                        onChange={(e) => setNotificationMethod(e.target.value as any)}
-                        className="w-5 h-5 text-pink-600"
-                      />
-                      <span className="font-semibold">Email Only</span>
-                    </label>
-                    <label className="flex items-center gap-3 cursor-pointer p-3 rounded-lg hover:bg-white transition">
-                      <input
-                        type="radio"
-                        name="notification"
-                        value="whatsapp"
-                        checked={notificationMethod === 'whatsapp'}
-                        onChange={(e) => setNotificationMethod(e.target.value as any)}
-                        className="w-5 h-5 text-pink-600"
-                      />
-                      <span className="font-semibold">WhatsApp Only</span>
-                    </label>
-                  </div>
-                </div>
               </div>
 
-              <div className="flex gap-4 mt-6">
+              <div className="flex gap-4">
                 <button
                   type="button"
                   onClick={() => setCurrentStep(3)}
@@ -875,54 +928,36 @@ Examples:
                 <button
                   type="submit"
                   disabled={loading}
-                  className="flex-1 px-8 py-5 bg-gradient-to-r from-pink-600 to-purple-600 text-white rounded-xl font-bold text-lg hover:from-pink-700 hover:to-purple-700 transition-all transform hover:scale-105 shadow-lg hover:shadow-2xl disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-3"
+                  className="flex-1 px-8 py-4 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl font-bold hover:from-green-700 hover:to-emerald-700 transition-all shadow-lg flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   {loading ? (
                     <>
-                      <Loader2 className="animate-spin" size={24} />
-                      {uploadProgress || 'Submitting...'}
+                      <Loader2 className="animate-spin" size={20} />
+                      {uploadProgress}
                     </>
                   ) : (
                     <>
-                      <Sparkles size={24} />
-                      Submit Custom Cake Request
+                      <Send size={20} />
+                      Submit Request via WhatsApp
+                      <MessageCircle size={20} />
                     </>
                   )}
                 </button>
               </div>
-
-              <p className="text-center text-sm text-gray-500 mt-4">
-                {!user && '⚠️ Please sign in to submit a request. '}
-                We&apos;ll contact you within 24 hours via your preferred method.
-              </p>
             </div>
-          </div>
+          )}
         </form>
 
-        {/* Info Banner */}
-        <div className="mt-8 bg-gradient-to-r from-blue-500 to-purple-500 rounded-2xl p-8 text-white text-center animate-fade-in" style={{ animationDelay: '300ms' }}>
-          <Info className="mx-auto mb-4" size={40} />
-          <h3 className="text-2xl font-bold mb-3">Need Help?</h3>
-          <p className="mb-4 text-blue-100">Our cake artists are here to help you create the perfect cake!</p>
-          <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            <a
-              href={`tel:${settings.phone}`}
-              className="flex items-center justify-center gap-2 bg-white text-blue-600 px-6 py-3 rounded-xl font-semibold hover:bg-blue-50 transition"
-            >
-              <Phone size={20} />
-              Call {settings.phone}
-            </a>
-            <a
-              href={`https://wa.me/${settings.whatsapp.replace(/[^0-9]/g, '')}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center justify-center gap-2 bg-green-500 text-white px-6 py-3 rounded-xl font-semibold hover:bg-green-600 transition"
-            >
-              <MessageCircle size={20} />
-              WhatsApp Us
-            </a>
+        {/* Loading Overlay */}
+        {loading && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+            <div className="bg-white rounded-2xl p-8 max-w-md text-center shadow-2xl">
+              <Loader2 className="animate-spin text-pink-600 mx-auto mb-4" size={48} />
+              <p className="text-lg font-semibold text-gray-800">{uploadProgress}</p>
+              <p className="text-sm text-gray-600 mt-2">Please wait...</p>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       <style jsx global>{`
@@ -932,7 +967,7 @@ Examples:
         }
         
         @keyframes scale-in {
-          from { opacity: 0; transform: scale(0.95); }
+          from { opacity: 0; transform: scale(0.9); }
           to { opacity: 1; transform: scale(1); }
         }
         

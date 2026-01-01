@@ -191,6 +191,7 @@ export default function OrdersPage() {
           createdAt: data.createdAt?.toDate?.() || new Date(),
         } as Order;
       });
+      
 
       setOrders(ordersData);
     } catch (error: any) {
@@ -225,6 +226,31 @@ export default function OrdersPage() {
       console.error('Error fetching custom requests:', error);
     }
   }, [user]);
+  useEffect(() => {
+  if (user) {
+    fetchUserProfile();
+    fetchOrders();
+    fetchCustomRequests();
+  }
+}, [user, fetchUserProfile, fetchOrders, fetchCustomRequests]);
+
+// ✅ NEW: Listen for orders linked event
+useEffect(() => {
+  const handleOrdersLinked = (e: CustomEvent) => {
+    console.log(`🔄 Refreshing orders after linking ${e.detail.count} orders`);
+    // Refresh orders and custom requests
+    fetchOrders();
+    fetchCustomRequests();
+    showSuccess(`✅ ${e.detail.count} orders linked to your account!`);
+  };
+
+  window.addEventListener('ordersLinked', handleOrdersLinked as EventListener);
+  
+  return () => {
+    window.removeEventListener('ordersLinked', handleOrdersLinked as EventListener);
+  };
+}, [fetchOrders, fetchCustomRequests, showSuccess]);
+
 
   useEffect(() => {
     if (!authLoading && !user) {

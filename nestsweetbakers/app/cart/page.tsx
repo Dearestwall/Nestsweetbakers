@@ -5,7 +5,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useSettings } from '@/hooks/useSettings';
 import { useToast } from '@/context/ToastContext';
 import { useState, useEffect, useCallback } from 'react';
-import { doc, getDoc, addDoc, collection, serverTimestamp, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
@@ -15,19 +15,8 @@ import {
   CheckCircle, AlertCircle, Truck, User, Phone, Mail, MapPin,
   Calendar, Edit2, Save, Package, ArrowRight, Shield,
   CreditCard, Clock, Gift, Percent, Info, Copy, Check,
-  Star, Heart, Share2, Download, Bell, Zap, TrendingUp,
-  ChevronDown, X, Sparkles, FileText
+  X, Sparkles, FileText, Zap, LogIn
 } from 'lucide-react';
-
-interface UserProfile {
-  displayName: string;
-  email: string;
-  phone: string;
-  address: string;
-  city: string;
-  state: string;
-  pincode: string;
-}
 
 interface CustomerInfo {
   name: string;
@@ -237,200 +226,127 @@ export default function CartPage() {
     return 'ORD' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substr(2, 5).toUpperCase();
   };
 
+  // ✅ MAIN ORDER SUBMISSION HANDLER
   const handlePlaceOrder = async () => {
-    if (!validateForm()) return;
+  if (!validateForm()) return;
 
-    setSubmitting(true);
+  setSubmitting(true);
 
-    try {
-      const orderRef = generateOrderRef();
-// ✅ GUEST ORDER SUPPORT
-      const isGuest = !user;
-      const userId = user?.uid || 'guest_' + Date.now();
-      
-      const orderData = {
+  try {
+    const orderRef = generateOrderRef();
+    const isGuest = !user;
+    
+    const orderData = {
+      orderRef,
+      isGuest,
+      userId: user?.uid || null,
+      userEmail: user?.email || customerInfo.email || null,
+      customerInfo: {
+        name: customerInfo.name,
+        phone: customerInfo.phone,
+        email: customerInfo.email || user?.email || '',
+        address: customerInfo.address,
+        city: customerInfo.city,
+        state: customerInfo.state,
+        pincode: customerInfo.pincode,
+      },
+      items: cart.map(item => ({
+        cakeId: item.id,
+        cakeName: item.name,
+        cakeImage: item.imageUrl,
+        quantity: item.quantity,
+        weight: `${item.quantity}kg`,
+        basePrice: item.basePrice,
+        totalPrice: item.basePrice * item.quantity,
+        customization: item.customization || '',
+        category: item.category || '',
+        flavor: item.flavor || '',
+      })),
+      deliveryDate: customerInfo.deliveryDate,
+      deliveryTime: customerInfo.deliveryTime,
+      isGift: !!customerInfo.recipientName,
+      recipientName: customerInfo.recipientName,
+      giftMessage: customerInfo.giftMessage,
+      occasionType: customerInfo.occasionType,
+      specialInstructions: customerInfo.specialInstructions,
+      orderNote: orderNote,
+      subtotal: totalPrice,
+      deliveryFee,
+      packagingFee,
+      tax,
+      discount,
+      promoCode: appliedPromo,
+      total: finalTotal,
+      paymentMethod,
+    };
+
+    // ✅ Call API route for order submission with proper error handling
+    const response = await fetch('/api/orders/submit', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify(orderData),
+    });
+
+    // Check if response is JSON
+    const contentType = response.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+      throw new Error('Server returned invalid response. Please try again.');
+    }
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      throw new Error(result.error || 'Failed to place order');
+    }
+
+    clearCart();
+    
+    // ✅ Store order reference in localStorage for guest users
+    if (isGuest) {
+      const guestOrders = JSON.parse(localStorage.getItem('guestOrders') || '[]');
+      guestOrders.push({
         orderRef,
-        userId,
-        isGuest, // ✅ Flag for guest orders
-        userName: customerInfo.name,
-        userEmail: customerInfo.email,
-        userPhone: customerInfo.phone,
-        
-        items: cart.map(item => ({
-          cakeId: item.id,
-          cakeName: item.name,
-          cakeImage: item.imageUrl,
-          quantity: item.quantity,
-          weight: `${item.quantity}kg`,
-          basePrice: item.basePrice,
-          totalPrice: item.basePrice * item.quantity,
-          customization: item.customization || '',
-          category: item.category || '',
-          flavor: item.flavor || '',
-        })),
-        
-        customerInfo: {
-          name: customerInfo.name,
-          phone: customerInfo.phone,
-          email: customerInfo.email,
-          address: customerInfo.address,
-          city: customerInfo.city,
-          state: customerInfo.state,
-          pincode: customerInfo.pincode,
-        },
-        
-        deliveryDate: customerInfo.deliveryDate,
-        deliveryTime: customerInfo.deliveryTime,
-        deliveryAddress: customerInfo.address,
-        
-        isGift: !!customerInfo.recipientName,
-        recipientName: customerInfo.recipientName,
-        giftMessage: customerInfo.giftMessage,
-        occasionType: customerInfo.occasionType,
-        
-        specialInstructions: customerInfo.specialInstructions,
-        orderNote: orderNote,
-        
-        subtotal: totalPrice,
-        deliveryFee,
-        packagingFee,
-        tax,
-        discount,
-        promoCode: appliedPromo,
-        total: finalTotal,
-        
-        paymentMethod,
-        paymentStatus: paymentMethod === 'cod' ? 'pending' : 'pending',
-        
-        status: 'pending',
-        orderStatus: 'pending',
-        trackingSteps: {
-          placed: true,
-          confirmed: false,
-          preparing: false,
-          outForDelivery: false,
-          delivered: false,
-        },
-        
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        source: 'website',
-        deviceInfo: typeof window !== 'undefined' ? {
-          userAgent: navigator.userAgent,
-          platform: navigator.platform,
-        } : {},
-      };
-
-      const docRef = await addDoc(collection(db, 'orders'), orderData);
-      const orderId = docRef.id;
-
-      await sendAdminNotification(orderId, orderData);
-
-      clearCart();
-      showSuccess('🎉 Order placed successfully!');
-
-      // ✅ GUEST USER FLOW
-      if (isGuest) {
-        // Show order tracking modal
-        showInfo(`Order ID: ${orderRef}. Save this to track your order!`);
-        
-        // Redirect to track order page with order ID
-        setTimeout(() => {
-          router.push(`/track-order?ref=${orderRef}`);
-        }, 2000);
-      } else {
-        // Logged-in user flow
-        if (paymentMethod === 'whatsapp') {
-          setTimeout(() => {
-            openWhatsApp(orderId, orderData);
-          }, 1000);
-        } else if (paymentMethod === 'online') {
-          showInfo('Redirecting to payment gateway...');
-          setTimeout(() => {
-            router.push(`/payment/${orderId}`);
-          }, 1500);
-        } else {
-          setTimeout(() => {
-            router.push(`/order-success/${orderId}`);
-          }, 1500);
-        }
-      }
-
-    } catch (error) {
-      console.error('Error placing order:', error);
-      showError('Failed to place order. Please try again.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const sendAdminNotification = async (orderId: string, orderData: any) => {
-    try {
-      await addDoc(collection(db, 'adminNotifications'), {
-        type: 'new_order',
-        orderId,
-        orderRef: orderData.orderRef,
-        customerName: orderData.customerInfo.name,
-        customerPhone: orderData.customerInfo.phone,
-        total: orderData.total,
-        itemCount: orderData.items.length,
-        status: 'unread',
-        createdAt: serverTimestamp(),
+        orderId: result.orderId,
+        customerEmail: customerInfo.email,
+        customerPhone: customerInfo.phone,
+        timestamp: Date.now(),
       });
-    } catch (error) {
-      console.error('Error sending notification:', error);
+      localStorage.setItem('guestOrders', JSON.stringify(guestOrders));
     }
-  };
 
-  const openWhatsApp = (orderId: string, orderData: any) => {
-    const itemsList = orderData.items.map((item: any, idx: number) => 
-      `${idx + 1}. *${item.cakeName}*\\n` +
-      `   Weight: ${item.weight}\\n` +
-      `   Price: ${currencySymbol}${item.totalPrice}` +
-      `${item.customization ? `\\n   Note: ${item.customization}` : ''}`
-    ).join('\\n\\n');
+    showSuccess('🎉 Order placed successfully!');
 
-    const message = `🎂 *NEW ORDER - ${settings.businessName || 'Nest Sweet Bakers'}*\\n\\n` +
-      `*Order ID:* ${orderData.orderRef}\\n` +
-      `*Order Date:* ${new Date().toLocaleDateString('en-IN')}\\n\\n` +
-      `━━━━━━━━━━━━━━━━━━━━\\n` +
-      `*👤 CUSTOMER DETAILS*\\n` +
-      `Name: ${orderData.customerInfo.name}\\n` +
-      `Phone: ${orderData.customerInfo.phone}\\n` +
-      `Email: ${orderData.customerInfo.email || 'N/A'}\\n\\n` +
-      `*📍 DELIVERY ADDRESS*\\n` +
-      `${orderData.deliveryAddress}\\n` +
-      `${orderData.customerInfo.city ? `City: ${orderData.customerInfo.city}\\n` : ''}` +
-      `${orderData.customerInfo.state ? `State: ${orderData.customerInfo.state}\\n` : ''}` +
-      `Pincode: ${orderData.customerInfo.pincode}\\n\\n` +
-      `*📅 DELIVERY DETAILS*\\n` +
-      `Date: ${new Date(orderData.deliveryDate).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}\\n` +
-      `Time: ${orderData.deliveryTime === 'morning' ? '9 AM - 12 PM' : orderData.deliveryTime === 'afternoon' ? '12 PM - 4 PM' : '4 PM - 8 PM'}\\n\\n` +
-      `${orderData.isGift ? `*🎁 GIFT ORDER*\\nRecipient: ${orderData.recipientName}\\nMessage: ${orderData.giftMessage}\\n\\n` : ''}` +
-      `*🎂 ORDER ITEMS (${orderData.items.length})*\\n${itemsList}\\n\\n` +
-      `━━━━━━━━━━━━━━━━━━━━\\n` +
-      `*💰 PRICE BREAKDOWN*\\n` +
-      `Subtotal: ${currencySymbol}${orderData.subtotal}\\n` +
-      `Delivery: ${orderData.deliveryFee === 0 ? 'FREE ✅' : currencySymbol + orderData.deliveryFee}\\n` +
-      `Packaging: ${currencySymbol}${orderData.packagingFee}\\n` +
-      `${orderData.tax > 0 ? `Tax: ${currencySymbol}${orderData.tax.toFixed(2)}\\n` : ''}` +
-      `${orderData.discount > 0 ? `Discount (${orderData.promoCode}): -${currencySymbol}${orderData.discount}\\n` : ''}` +
-      `*TOTAL: ${currencySymbol}${orderData.total.toFixed(2)}*\\n\\n` +
-      `*💳 PAYMENT METHOD:* ${orderData.paymentMethod.toUpperCase()}\\n\\n` +
-      `${orderData.specialInstructions ? `*📝 Special Instructions:*\\n${orderData.specialInstructions}\\n\\n` : ''}` +
-      `${orderData.orderNote ? `*📌 Order Note:*\\n${orderData.orderNote}\\n\\n` : ''}` +
-      `━━━━━━━━━━━━━━━━━━━━\\n` +
-      `🔗 *View Full Order:*\\n${process.env.NEXT_PUBLIC_SITE_URL || ''}/admin/orders/${orderId}\\n\\n` +
-      `_Automated order notification from ${settings.businessName || 'Nest Sweet Bakers'}_`;
+    // ✅ ALWAYS open WhatsApp for ALL users (logged-in + guest)
+    if (result.whatsappUrl) {
+      showInfo('Opening WhatsApp to send order details...');
+      
+      // Open WhatsApp after a short delay
+      setTimeout(() => {
+        window.open(result.whatsappUrl, '_blank');
+      }, 1000);
+    }
 
-    const whatsappUrl = `https://wa.me/${(settings.whatsapp || '').replace(/[^0-9]/g, '')}?text=${encodeURIComponent(message)}`;
-    window.open(whatsappUrl, '_blank');
-  };
+    // ✅ Redirect to confirmation page
+    setTimeout(() => {
+      router.push(`/order-confirmation/${result.orderId}?ref=${orderRef}`);
+    }, 2000);
+
+  } catch (error: any) {
+    console.error('Error placing order:', error);
+    showError(error.message || 'Failed to place order. Please try again.');
+  } finally {
+    setSubmitting(false);
+  }
+};
+
 
   const copyOrderSummary = () => {
     const summary = cart.map(item => 
       `${item.name} - ${item.quantity}kg - ${currencySymbol}${item.basePrice * item.quantity}`
-    ).join('\\n');
+    ).join('\n');
     navigator.clipboard.writeText(summary);
     setCopied(true);
     showSuccess('Order summary copied!');
@@ -438,36 +354,33 @@ export default function CartPage() {
   };
 
   const handleSaveInfo = async () => {
-  if (!customerInfo.name || !customerInfo.phone || !customerInfo.address || !customerInfo.pincode) {
-    showError('Please fill in all required fields');
-    return;
-  }
-
-  try {
-    if (user) {
-      // ✅ Use setDoc with merge: true instead of updateDoc
-      await setDoc(doc(db, 'userProfiles', user.uid), {
-        displayName: customerInfo.name,
-        phone: customerInfo.phone,
-        email: customerInfo.email || user.email || '',
-        address: customerInfo.address,
-        city: customerInfo.city,
-        state: customerInfo.state,
-        pincode: customerInfo.pincode,
-        updatedAt: serverTimestamp(),
-      }, { merge: true }); // ✅ This creates the document if it doesn't exist
-      
-      showSuccess('Profile saved successfully!');
+    if (!customerInfo.name || !customerInfo.phone || !customerInfo.address || !customerInfo.pincode) {
+      showError('Please fill in all required fields');
+      return;
     }
-    setIsEditingInfo(false);
-  } catch (error) {
-    console.error('Error saving profile:', error);
-    showError('Failed to save profile. Please try again.');
-    // Still allow user to continue with order
-    setIsEditingInfo(false);
-  }
-};
 
+    try {
+      if (user) {
+        await setDoc(doc(db, 'userProfiles', user.uid), {
+          displayName: customerInfo.name,
+          phone: customerInfo.phone,
+          email: customerInfo.email || user.email || '',
+          address: customerInfo.address,
+          city: customerInfo.city,
+          state: customerInfo.state,
+          pincode: customerInfo.pincode,
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+        
+        showSuccess('Profile saved successfully!');
+      }
+      setIsEditingInfo(false);
+    } catch (error) {
+      console.error('Error saving profile:', error);
+      showError('Failed to save profile. Please try again.');
+      setIsEditingInfo(false);
+    }
+  };
 
   if (loadingProfile) {
     return (
@@ -532,7 +445,31 @@ export default function CartPage() {
             </button>
           </div>
 
-          {/* Progress Bar */}
+          {/* ✅ Guest User Banner */}
+          {!user && (
+            <div className="bg-gradient-to-r from-blue-500 to-purple-500 rounded-xl md:rounded-2xl p-4 md:p-5 text-white shadow-lg mb-4">
+              <div className="flex items-start gap-3">
+                <Info className="flex-shrink-0 mt-0.5" size={20} />
+                <div className="flex-1">
+                  <h3 className="font-bold text-base md:text-lg mb-2 flex items-center gap-2">
+                    Checkout as Guest or Sign In
+                  </h3>
+                  <p className="text-xs md:text-sm opacity-90 mb-3">
+                    You can place your order without signing in. Save your order reference to track later, or sign in to manage all your orders in one place!
+                  </p>
+                  <Link
+                    href="/login"
+                    className="inline-flex items-center gap-2 bg-white text-purple-600 px-4 py-2 rounded-lg hover:bg-gray-100 transition font-semibold text-sm shadow-md"
+                  >
+                    <LogIn size={16} />
+                    Sign In to Your Account
+                  </Link>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Progress Bar for Free Delivery */}
           {totalPrice < (settings.freeDeliveryAbove || 1000) && (
             <div className="bg-white rounded-xl md:rounded-2xl p-4 shadow-lg border border-pink-100">
               <div className="flex items-center justify-between mb-3">
@@ -658,9 +595,9 @@ export default function CartPage() {
             </div>
           </div>
 
-          {/* Checkout Section */}
+          {/* Checkout Section - CONTINUES IN NEXT MESSAGE... */}
           <div className="space-y-4 md:space-y-6 animate-fade-in" style={{ animationDelay: '200ms' }}>
-            {/* 1. Customer Information - BASIC INFO ONLY */}
+            {/* Customer Information Card */}
             <div className="bg-white rounded-xl md:rounded-2xl shadow-lg p-4 md:p-6 border border-gray-100">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg md:text-xl font-bold flex items-center gap-2">
@@ -779,7 +716,7 @@ export default function CartPage() {
               )}
             </div>
 
-            {/* 2. Delivery Details - SEPARATE CARD */}
+            {/* Delivery Details Card */}
             <div className="bg-white rounded-xl md:rounded-2xl shadow-lg p-4 md:p-6 border border-gray-100">
               <h2 className="text-lg md:text-xl font-bold flex items-center gap-2 mb-4">
                 <Calendar className="text-pink-600" size={20} />
@@ -818,7 +755,7 @@ export default function CartPage() {
               </div>
             </div>
 
-            {/* 3. Gift Options - SEPARATE CARD */}
+            {/* Gift Options Card */}
             <div className="bg-white rounded-xl md:rounded-2xl shadow-lg p-4 md:p-6 border border-gray-100">
               <label className="flex items-center gap-2 mb-4 cursor-pointer group">
                 <input
@@ -875,7 +812,7 @@ export default function CartPage() {
               )}
             </div>
 
-            {/* 4. Special Instructions - SEPARATE CARD */}
+            {/* Special Instructions Card */}
             <div className="bg-white rounded-xl md:rounded-2xl shadow-lg p-4 md:p-6 border border-gray-100">
               <h2 className="text-lg md:text-xl font-bold flex items-center gap-2 mb-4">
                 <FileText className="text-pink-600" size={20} />
@@ -893,7 +830,7 @@ export default function CartPage() {
               <p className="text-xs text-gray-500 mt-2 text-right">{customerInfo.specialInstructions.length}/500</p>
             </div>
 
-            {/* 5. Promo Code */}
+            {/* Promo Code Card */}
             <div className="bg-white rounded-xl md:rounded-2xl shadow-lg p-4 md:p-6 border border-gray-100">
               <button
                 onClick={() => setShowPromo(!showPromo)}
@@ -903,7 +840,7 @@ export default function CartPage() {
                   <Percent size={18} />
                   {appliedPromo ? `Promo: ${appliedPromo}` : 'Have a promo code?'}
                 </span>
-                <ChevronDown className={`transition-transform ${showPromo ? 'rotate-180' : ''}`} size={18} />
+                <X className={`transition-transform ${showPromo ? 'rotate-0' : 'rotate-45'}`} size={18} />
               </button>
 
               {showPromo && !appliedPromo && (
@@ -943,7 +880,7 @@ export default function CartPage() {
               )}
             </div>
 
-            {/* 6. Order Summary */}
+            {/* Order Summary Card */}
             <div className="bg-white rounded-xl md:rounded-2xl shadow-lg p-4 md:p-6 border border-gray-100">
               <h2 className="text-lg md:text-xl font-bold mb-4 flex items-center gap-2">
                 <Package className="text-pink-600" size={20} />
@@ -1040,23 +977,27 @@ export default function CartPage() {
                     </label>
                   )}
 
-                  {settings.enableOnlinePayment && (
-                    <label className="flex items-center gap-2 md:gap-3 p-3 md:p-4 border-2 border-gray-200 rounded-lg md:rounded-xl cursor-pointer hover:border-purple-400 transition">
-                      <input
-                        type="radio"
-                        name="paymentMethod"
-                        value="online"
-                        checked={paymentMethod === 'online'}
-                        onChange={(e) => setPaymentMethod(e.target.value as any)}
-                        className="w-4 h-4 md:w-5 md:h-5 text-purple-600"
-                      />
-                      <CreditCard className="text-purple-600" size={18} />
-                      <div className="flex-1">
+                  <label className="flex items-center gap-2 md:gap-3 p-3 md:p-4 border-2 border-gray-200 rounded-lg md:rounded-xl cursor-pointer hover:border-purple-400 transition relative overflow-hidden bg-gradient-to-r from-purple-50 to-pink-50">
+                    <input
+                      type="radio"
+                      name="paymentMethod"
+                      value="online"
+                      checked={paymentMethod === 'online'}
+                      onChange={(e) => setPaymentMethod(e.target.value as any)}
+                      className="w-4 h-4 md:w-5 md:h-5 text-purple-600"
+                    />
+                    <CreditCard className="text-purple-600" size={18} />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
                         <p className="font-semibold text-sm md:text-base">Online Payment</p>
-                        <p className="text-xs text-gray-600">UPI, Cards, Net Banking</p>
+                        <span className="px-2 py-0.5 bg-gradient-to-r from-orange-500 to-red-500 text-white text-xs font-bold rounded-full animate-pulse">
+                          COMING SOON
+                        </span>
                       </div>
-                    </label>
-                  )}
+                      <p className="text-xs text-gray-600">UPI, Cards, Net Banking</p>
+                    </div>
+                    <Sparkles className="text-orange-500" size={18} />
+                  </label>
                 </div>
               </div>
 
@@ -1095,10 +1036,8 @@ export default function CartPage() {
                   </>
                 ) : (
                   <>
-                    {paymentMethod === 'whatsapp' ? <MessageCircle size={20} /> :
-                     paymentMethod === 'online' ? <CreditCard size={20} /> :
-                     <Package size={20} />}
-                    Place Order • {currencySymbol}{finalTotal.toFixed(2)}
+                    <MessageCircle size={20} />
+                    Place Order via WhatsApp • {currencySymbol}{finalTotal.toFixed(2)}
                     <ArrowRight size={20} />
                   </>
                 )}
@@ -1123,7 +1062,7 @@ export default function CartPage() {
             {/* Help Section */}
             <div className="bg-gradient-to-r from-blue-500 to-purple-500 rounded-xl md:rounded-2xl p-4 md:p-6 text-white shadow-lg">
               <h3 className="font-bold text-base md:text-lg mb-3 flex items-center gap-2">
-                <Bell size={18} />
+                <Info size={18} />
                 Need Help?
               </h3>
               <div className="space-y-2 text-xs md:text-sm">

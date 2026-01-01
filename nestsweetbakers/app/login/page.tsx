@@ -52,30 +52,40 @@ function LoginContent() {
     }
   };
 
-  const handleEmailLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
+ const handleEmailLogin = async (e: React.FormEvent) => {
+  e.preventDefault();
+  
+  if (!email || !password) {
+    showError('Please enter both email and password');
+    return;
+  }
 
-    try {
-      await signInWithEmail(email, password);
-      showSuccess('✅ Welcome back! Signed in successfully.');
-      
-      const redirect = searchParams.get('redirect') || '/';
-      
-      // Show info about linking orders
-      setTimeout(() => {
-        showInfo('Checking for guest orders to link...');
-      }, 500);
-      
+  setLoading(true);
+  setError('');
+
+  try {
+    await signInWithEmail(email, password);
+    showSuccess('Welcome back! 🎉');
+    
+    // Check for redirect
+    const redirect = searchParams.get('redirect');
+    if (redirect) {
       router.push(redirect);
-    } catch (err: any) {
-      console.error('Login error:', err);
-      const errorMsg = getErrorMessage(err);
-      if (errorMsg) showError(errorMsg);
-    } finally {
-      setLoading(false);
+    } else {
+      router.push('/');
     }
-  };
+  } catch (error: any) {
+    console.error('Login error:', error);
+    
+    // Show user-friendly error message
+    const errorMessage = error.message || 'Failed to sign in. Please try again.';
+    setError(errorMessage);
+    showError(errorMessage);
+  } finally {
+    setLoading(false);
+  }
+};
+
 
   const handleGoogleLogin = async () => {
     setLoading(true);
@@ -292,3 +302,7 @@ export default function LoginPage() {
     </Suspense>
   );
 }
+function setError(arg0: string) {
+  throw new Error('Function not implemented.');
+}
+
