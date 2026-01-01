@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { useCart } from '@/context/CartContext';
 import { useAuth } from '@/context/AuthContext';
+import { useSettings } from '@/hooks/useSettings';
 import { useRouter, usePathname } from 'next/navigation';
 import { getUnreadNotificationCount } from '@/lib/notificationUtils';
 
@@ -25,6 +26,7 @@ export default function Header() {
   
   const { cartCount, isHydrated } = useCart();
   const { user, isAdmin, isSuperAdmin, signOut } = useAuth();
+  const { settings, loading: settingsLoading } = useSettings();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -133,6 +135,10 @@ export default function Header() {
     return pathname.startsWith(href);
   };
 
+  // Use settings from hook or fallback
+  const businessName = settings.businessName || 'NestSweets';
+  const logo = settings.logo;
+
   return (
     <>
       <header
@@ -146,23 +152,34 @@ export default function Header() {
       >
         <div className="max-w-7xl mx-auto px-3 sm:px-4">
           <div className="flex items-center justify-between">
-            {/* Logo - Compact */}
+            {/* Logo */}
             <Link href="/" className="flex items-center space-x-1.5 group relative z-10">
-              <div className={`transition-all duration-500 ${scrolled ? 'text-2xl' : 'text-3xl'}`}>
-                <span className="inline-block group-hover:scale-110 group-hover:rotate-12 transition-all duration-300">
-                  🍰
-                </span>
-              </div>
+              {logo ? (
+                <div className={`relative transition-all duration-500 ${scrolled ? 'w-8 h-8' : 'w-10 h-10'}`}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={logo}
+                    alt={businessName}
+                    className="w-full h-full object-contain group-hover:scale-110 transition-transform"
+                  />
+                </div>
+              ) : (
+                <div className={`transition-all duration-500 ${scrolled ? 'text-2xl' : 'text-3xl'}`}>
+                  <span className="inline-block group-hover:scale-110 group-hover:rotate-12 transition-all duration-300">
+                    🍰
+                  </span>
+                </div>
+              )}
               <div className="overflow-hidden">
                 <span className={`font-bold text-pink-600 group-hover:text-pink-700 transition-all duration-300 inline-block group-hover:translate-x-0.5 ${
                   scrolled ? 'text-lg' : 'text-xl'
                 }`}>
-                  NestSweets
+                  {businessName}
                 </span>
               </div>
             </Link>
 
-            {/* Desktop Navigation - Compact */}
+            {/* Desktop Navigation */}
             <nav className="hidden lg:flex items-center space-x-0.5 xl:space-x-1">
               {navLinks.map((link) => {
                 const Icon = link.icon;
@@ -188,7 +205,7 @@ export default function Header() {
               })}
             </nav>
 
-            {/* Right Actions - Compact */}
+            {/* Right Actions */}
             <div className="flex items-center space-x-1">
               {/* Search */}
               <button
@@ -201,7 +218,7 @@ export default function Header() {
                 <Search size={scrolled ? 18 : 20} className="transition-all duration-300" />
               </button>
 
-              {/* Track Order - Compact */}
+              {/* Track Order */}
               <Link
                 href="/track-order"
                 className="hidden md:flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-gray-700 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all duration-300"
@@ -212,7 +229,7 @@ export default function Header() {
               </Link>
 
               {/* Notifications */}
-              {user && (
+              {user && settings.features.enableReviews && (
                 <Link
                   href="/notifications"
                   className="relative p-1.5 rounded-full hover:bg-pink-50 transition-all duration-300 transform hover:scale-110 hidden md:block"
@@ -228,7 +245,7 @@ export default function Header() {
               )}
 
               {/* Wishlist */}
-              {user && (
+              {user && settings.features.enableWishlist && (
                 <Link
                   href="/wishlist"
                   className="hidden md:flex p-1.5 rounded-full hover:bg-pink-50 transition-all duration-300 transform hover:scale-110 text-gray-700 hover:text-pink-600"
@@ -449,7 +466,7 @@ export default function Header() {
             </div>
           </div>
 
-          {/* Search Bar - Compact */}
+          {/* Search Bar */}
           <div className={`overflow-hidden transition-all duration-500 ${
             searchOpen ? 'max-h-16 mt-2' : 'max-h-0'
           }`}>
@@ -477,10 +494,10 @@ export default function Header() {
         </div>
       </header>
 
-      {/* Spacer - Compact */}
+      {/* Spacer */}
       <div className={`transition-all duration-500 ${scrolled ? 'h-12' : 'h-14'}`} />
 
-      {/* Mobile Menu Overlay */}
+      {/* Mobile Menu (keeping existing code for mobile menu) */}
       {mobileMenuOpen && (
         <div 
           className="fixed inset-0 bg-black/50 z-40 lg:hidden animate-fade-in backdrop-blur-sm"
@@ -488,7 +505,6 @@ export default function Header() {
         />
       )}
 
-      {/* Mobile Menu */}
       <div className={`fixed top-0 right-0 bottom-0 w-80 bg-white z-50 lg:hidden transform transition-transform duration-500 ease-out shadow-2xl ${
         mobileMenuOpen ? 'translate-x-0' : 'translate-x-full'
       }`}>
@@ -497,8 +513,13 @@ export default function Header() {
           <div className="p-6 bg-gradient-to-r from-pink-600 to-purple-600 text-white">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
-                <span className="text-3xl">🍰</span>
-                <span className="font-bold text-xl">Menu</span>
+                {logo ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={logo} alt={businessName} className="w-10 h-10 object-contain" />
+                ) : (
+                  <span className="text-3xl">🍰</span>
+                )}
+                <span className="font-bold text-xl">{businessName}</span>
               </div>
               <button
                 onClick={() => setMobileMenuOpen(false)}
@@ -659,7 +680,7 @@ export default function Header() {
               </button>
             )}
             <p className="text-center text-xs text-gray-500">
-              © 2025 NestSweets. All rights reserved.
+              © {new Date().getFullYear()} {businessName}. All rights reserved.
             </p>
           </div>
         </div>

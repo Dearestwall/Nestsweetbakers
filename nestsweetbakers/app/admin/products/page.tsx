@@ -8,6 +8,7 @@ import { db } from '@/lib/firebase';
 import { useToast } from '@/context/ToastContext';
 import { notificationService } from '@/lib/notificationService';
 import { Cake } from '@/lib/types';
+import Papa from 'papaparse';
 import { 
   Plus, Edit, Trash2, Search, Package, DollarSign, Tag, X, TrendingUp, Images,
   Copy, Download, Grid3x3, List, CheckSquare, Square, Trash, Filter,
@@ -48,7 +49,16 @@ export default function AdminProducts() {
   const [bulkDeleteMode, setBulkDeleteMode] = useState(false);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [featuredFilter, setFeaturedFilter] = useState<'all' | 'featured' | 'regular'>('all');
-  const [stockFilter, setStockFilter] = useState<'all' | 'instock' | 'lowstock' | 'outofstock'>('all');
+  // Add these state variables
+const [importModal, setImportModal] = useState(false);
+const [importFile, setImportFile] = useState<File | null>(null);
+const [importing, setImporting] = useState(false);
+const [importProgress, setImportProgress] = useState(0);
+const [importErrors, setImportErrors] = useState<string[]>([]);
+const [importFormat, setImportFormat] = useState<'csv' | 'json' | 'excel'>('csv');
+const [jsonText, setJsonText] = useState('');
+const [showJsonEditor, setShowJsonEditor] = useState(false); 
+const [stockFilter, setStockFilter] = useState<'all' | 'instock' | 'lowstock' | 'outofstock'>('all');
   const [confirmModal, setConfirmModal] = useState<{
     show: boolean;
     id: string | string[];
@@ -344,6 +354,387 @@ export default function AdminProducts() {
       showError('Failed to update product');
     }
   }
+  // Add CSV Template Download Function
+function downloadTemplate() {
+  const template = `Name,Description,Category,Base Price,Currency,Discount,Stock,Featured,Tags,Delivery Pincodes,SEO Keywords,Min Order,Max Order,Image URL
+Chocolate Truffle Cake,Rich and creamy chocolate cake,Birthday,599,INR,10,50,true,"Chocolate,Premium,Birthday","110001,110002","best chocolate cake,truffle cake online",0.5,10,https://images.unsplash.com/photo-1578985545062-69928b1d9587
+Vanilla Sponge Cake,Light and fluffy vanilla delight,Birthday,499,INR,5,30,false,"Vanilla,Classic","110001,110002,110003","vanilla cake,sponge cake",0.5,5,https://images.unsplash.com/photo-1464349095431-e9a21285b5f3`;
+
+  const blob = new Blob([template], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'products_import_template.csv';
+  link.click();
+  URL.revokeObjectURL(url);
+  
+  showSuccess('✅ Template downloaded successfully');
+}
+
+// CSV Import Function
+async function handleImportCSV() {
+  if (!importFile) {
+    showError('❌ Please select a CSV file');
+    return;
+  }
+
+  setImporting(true);
+  setImportErrors([]);
+  setImportProgress(0);
+
+  Papa.parse(importFile, {
+    header: true,
+    skipEmptyLines: true,
+    complete: async (results) => {
+      const data = results.data as any[];
+      const errors: string[] = [];
+      let successCount = 0;
+
+      try {
+        const batch = writeBatch(db);
+        
+        for (let i = 0; i < data.length; i++) {
+          const row = data[i];
+          
+          // Validate required fields
+          if (!row.Name || !row.Description || !row.Category || !row['Base Price'] || !row['Image URL']) {
+            errors.push(`Row ${i + 2}: Missing required fields`);
+            continue;
+          }
+
+          const productData = {
+            name: row.Name.trim(),
+            description: row.Description.trim(),
+            category: row.Category.trim(),
+            basePrice: parseFloat(row['Base Price']) || 0,
+            currency: (row.Currency || 'INR').toUpperCase() as 'INR' | 'CAD',
+            imageUrl: row['Image URL'].trim(),
+            images: [],
+            discount: parseInt(row.Discount) || 0,
+            stock: row.Stock ? parseInt(row.Stock) : undefined,
+            featured: row.Featured?.toLowerCase() === 'true',
+            tags: row.Tags ? row.Tags.split(',').map((t: string) => t.trim()) : [],
+            deliveryPincodes: row['Delivery Pincodes'] ? row['Delivery Pincodes'].split(',').map((p: string) => p.trim()) : [],
+            seoKeywords: row['SEO Keywords'] ? row['SEO Keywords'].split(',').map((k: string) => k.trim()) : [],
+            minOrder: parseFloat(row['Min Order']) || 0.5,
+            maxOrder: parseFloat(row['Max Order']) || 10,
+            orderCount: 0,
+            rating: 0,
+            reviewCount: 0,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          };
+
+          const docRef = doc(collection(db, 'products'));
+          batch.set(docRef, productData);
+          successCount++;
+          
+          setImportProgress(Math.round(((i + 1) / data.length) * 100));
+        }
+
+        await batch.commit();
+
+        // Notify all users about new products
+        await notifyAllUsersNewProducts(successCount);
+
+        showSuccess(`✅ Successfully imported ${successCount} products!`);
+        if (errors.length > 0) {
+          setImportErrors(errors);
+          showInfo(`⚠️ ${errors.length} rows had errors`);
+        }
+        
+        fetchProducts();
+        setImportModal(false);
+        setImportFile(null);
+      } catch (error) {
+        console.error('Import error:', error);
+        showError('❌ Failed to import products');
+      } finally {
+        setImporting(false);
+        setImportProgress(0);
+      }
+    },
+    error: (error) => {
+      console.error('CSV Parse Error:', error);
+      showError('❌ Failed to parse CSV file');
+      setImporting(false);
+    }
+  });
+}
+
+// Notify all users function
+async function notifyAllUsersNewProducts(count: number) {
+  try {
+    const usersSnapshot = await getDocs(collection(db, 'users'));
+    const batch = writeBatch(db);
+    
+    usersSnapshot.docs.forEach((userDoc) => {
+      const notifRef = doc(collection(db, 'notifications'));
+      batch.set(notifRef, {
+        userId: userDoc.id,
+        title: '🎉 New Cakes Added!',
+        body: `${count} delicious new cake${count > 1 ? 's' : ''} just added to our menu. Check them out now!`,
+        type: 'info',
+        read: false,
+        createdAt: serverTimestamp(),
+        actionUrl: '/products'
+      });
+    });
+
+    await batch.commit();
+  } catch (error) {
+    console.error('Error sending notifications:', error);
+  }
+}
+// Multi-format import handler
+async function handleMultiFormatImport() {
+  if (importFormat === 'json') {
+    await handleImportJSON();
+  } else if (importFormat === 'csv') {
+    await handleImportCSV();
+  } else if (importFormat === 'excel') {
+    await handleImportExcel();
+  }
+}
+
+// JSON Import Function
+async function handleImportJSON() {
+  try {
+    setImporting(true);
+    setImportErrors([]);
+    setImportProgress(0);
+
+    let data: any[];
+
+    // Parse JSON from file or text editor
+    if (importFile) {
+      const fileText = await importFile.text();
+      data = JSON.parse(fileText);
+    } else if (jsonText.trim()) {
+      data = JSON.parse(jsonText);
+    } else {
+      showError('❌ Please provide JSON data');
+      return;
+    }
+
+    // Validate JSON structure
+    if (!Array.isArray(data)) {
+      showError('❌ JSON must be an array of products');
+      return;
+    }
+
+    const errors: string[] = [];
+    let successCount = 0;
+    const batch = writeBatch(db);
+
+    for (let i = 0; i < data.length; i++) {
+      const item = data[i];
+
+      // Validate required fields
+      if (!item.name || !item.description || !item.category || !item.basePrice || !item.imageUrl) {
+        errors.push(`Product ${i + 1}: Missing required fields (name, description, category, basePrice, imageUrl)`);
+        continue;
+      }
+
+      const productData = {
+        name: item.name,
+        description: item.description,
+        category: item.category,
+        basePrice: parseFloat(item.basePrice) || 0,
+        currency: (item.currency || 'INR').toUpperCase() as 'INR' | 'CAD',
+        imageUrl: item.imageUrl,
+        images: Array.isArray(item.images) ? item.images : [],
+        discount: parseInt(item.discount) || 0,
+        stock: item.stock !== undefined ? parseInt(item.stock) : undefined,
+        featured: item.featured === true || item.featured === 'true',
+        tags: Array.isArray(item.tags) ? item.tags : [],
+        deliveryPincodes: Array.isArray(item.deliveryPincodes) ? item.deliveryPincodes : [],
+        seoKeywords: Array.isArray(item.seoKeywords) ? item.seoKeywords : [],
+        minOrder: parseFloat(item.minOrder) || 0.5,
+        maxOrder: parseFloat(item.maxOrder) || 10,
+        orderCount: 0,
+        rating: 0,
+        reviewCount: 0,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      };
+
+      const docRef = doc(collection(db, 'products'));
+      batch.set(docRef, productData);
+      successCount++;
+
+      setImportProgress(Math.round(((i + 1) / data.length) * 100));
+    }
+
+    await batch.commit();
+    await notifyAllUsersNewProducts(successCount);
+
+    showSuccess(`✅ Successfully imported ${successCount} products from JSON!`);
+    if (errors.length > 0) {
+      setImportErrors(errors);
+      showInfo(`⚠️ ${errors.length} products had errors`);
+    }
+
+    fetchProducts();
+    setImportModal(false);
+    setImportFile(null);
+    setJsonText('');
+  } catch (error: any) {
+    console.error('JSON Import Error:', error);
+    showError(`❌ JSON Parse Error: ${error.message}`);
+  } finally {
+    setImporting(false);
+    setImportProgress(0);
+  }
+}
+
+// Excel/XLSX Import Function (requires xlsx library)
+async function handleImportExcel() {
+  if (!importFile) {
+    showError('❌ Please select an Excel file');
+    return;
+  }
+
+  try {
+    setImporting(true);
+    setImportErrors([]);
+    setImportProgress(0);
+
+    const XLSX = await import('xlsx');
+    const fileBuffer = await importFile.arrayBuffer();
+    const workbook = XLSX.read(fileBuffer, { type: 'array' });
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    const data = XLSX.utils.sheet_to_json(worksheet);
+
+    const errors: string[] = [];
+    let successCount = 0;
+    const batch = writeBatch(db);
+
+    for (let i = 0; i < data.length; i++) {
+      const row: any = data[i];
+
+      // Validate required fields (same column names as CSV)
+      if (!row.Name || !row.Description || !row.Category || !row['Base Price'] || !row['Image URL']) {
+        errors.push(`Row ${i + 2}: Missing required fields`);
+        continue;
+      }
+
+      const productData = {
+        name: row.Name.toString().trim(),
+        description: row.Description.toString().trim(),
+        category: row.Category.toString().trim(),
+        basePrice: parseFloat(row['Base Price']) || 0,
+        currency: (row.Currency || 'INR').toString().toUpperCase() as 'INR' | 'CAD',
+        imageUrl: row['Image URL'].toString().trim(),
+        images: [],
+        discount: parseInt(row.Discount) || 0,
+        stock: row.Stock ? parseInt(row.Stock) : undefined,
+        featured: row.Featured?.toString().toLowerCase() === 'true',
+        tags: row.Tags ? row.Tags.toString().split(',').map((t: string) => t.trim()) : [],
+        deliveryPincodes: row['Delivery Pincodes'] ? row['Delivery Pincodes'].toString().split(',').map((p: string) => p.trim()) : [],
+        seoKeywords: row['SEO Keywords'] ? row['SEO Keywords'].toString().split(',').map((k: string) => k.trim()) : [],
+        minOrder: parseFloat(row['Min Order']) || 0.5,
+        maxOrder: parseFloat(row['Max Order']) || 10,
+        orderCount: 0,
+        rating: 0,
+        reviewCount: 0,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      };
+
+      const docRef = doc(collection(db, 'products'));
+      batch.set(docRef, productData);
+      successCount++;
+
+      setImportProgress(Math.round(((i + 1) / data.length) * 100));
+    }
+
+    await batch.commit();
+    await notifyAllUsersNewProducts(successCount);
+
+    showSuccess(`✅ Successfully imported ${successCount} products from Excel!`);
+    if (errors.length > 0) {
+      setImportErrors(errors);
+      showInfo(`⚠️ ${errors.length} rows had errors`);
+    }
+
+    fetchProducts();
+    setImportModal(false);
+    setImportFile(null);
+  } catch (error: any) {
+    console.error('Excel Import Error:', error);
+    showError(`❌ Failed to import Excel file: ${error.message}`);
+  } finally {
+    setImporting(false);
+    setImportProgress(0);
+  }
+}
+
+// Download JSON Template
+function downloadJSONTemplate() {
+  const template = [
+    {
+      name: "Chocolate Truffle Cake",
+      description: "Rich and creamy chocolate cake with truffle layers",
+      category: "Birthday",
+      basePrice: 599,
+      currency: "INR",
+      discount: 10,
+      stock: 50,
+      featured: true,
+      tags: ["Chocolate", "Premium", "Birthday"],
+      deliveryPincodes: ["110001", "110002"],
+      seoKeywords: ["best chocolate cake", "truffle cake online"],
+      minOrder: 0.5,
+      maxOrder: 10,
+      imageUrl: "https://images.unsplash.com/photo-1578985545062-69928b1d9587"
+    },
+    {
+      name: "Vanilla Sponge Cake",
+      description: "Light and fluffy vanilla delight",
+      category: "Birthday",
+      basePrice: 499,
+      currency: "INR",
+      discount: 5,
+      stock: 30,
+      featured: false,
+      tags: ["Vanilla", "Classic"],
+      deliveryPincodes: ["110001", "110002", "110003"],
+      seoKeywords: ["vanilla cake", "sponge cake"],
+      minOrder: 0.5,
+      maxOrder: 5,
+      imageUrl: "https://images.unsplash.com/photo-1464349095431-e9a21285b5f3"
+    }
+  ];
+
+  const blob = new Blob([JSON.stringify(template, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'products_import_template.json';
+  link.click();
+  URL.revokeObjectURL(url);
+
+  showSuccess('✅ JSON Template downloaded successfully');
+}
+
+// Download Excel Template
+function downloadExcelTemplate() {
+  const template = `Name,Description,Category,Base Price,Currency,Discount,Stock,Featured,Tags,Delivery Pincodes,SEO Keywords,Min Order,Max Order,Image URL
+Chocolate Truffle Cake,Rich and creamy chocolate cake,Birthday,599,INR,10,50,true,"Chocolate,Premium,Birthday","110001,110002","best chocolate cake,truffle cake online",0.5,10,https://images.unsplash.com/photo-1578985545062-69928b1d9587
+Vanilla Sponge Cake,Light and fluffy vanilla delight,Birthday,499,INR,5,30,false,"Vanilla,Classic","110001,110002,110003","vanilla cake,sponge cake",0.5,5,https://images.unsplash.com/photo-1464349095431-e9a21285b5f3`;
+
+  const blob = new Blob([template], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'products_import_template.xlsx';
+  link.click();
+  URL.revokeObjectURL(url);
+
+  showSuccess('✅ Excel Template downloaded successfully');
+}
 
   function exportToCSV() {
     const headers = ['Name', 'Description', 'Category', 'Base Price', 'Discount %', 'Final Price', 'Stock', 'Currency', 'Orders', 'Featured', 'Tags', 'Image URL'];
@@ -520,6 +911,255 @@ export default function AdminProducts() {
         </div>
       )}
 
+{importModal && (
+  <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in overflow-y-auto">
+    <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full p-6 animate-scale-up my-8">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center">
+            <Upload className="text-purple-600" size={24} />
+          </div>
+          <div>
+            <h3 className="text-2xl font-bold text-gray-800">Import Products</h3>
+            <p className="text-sm text-gray-600">Bulk upload via CSV, JSON, or Excel</p>
+          </div>
+        </div>
+        <button
+          onClick={() => {
+            setImportModal(false);
+            setImportFile(null);
+            setJsonText('');
+            setImportErrors([]);
+          }}
+          className="p-2 hover:bg-gray-100 rounded-lg transition"
+        >
+          <X size={24} />
+        </button>
+      </div>
+
+      <div className="space-y-4">
+        {/* Format Selection */}
+        <div className="p-4 bg-gradient-to-r from-purple-50 to-pink-50 border-2 border-purple-200 rounded-xl">
+          <h4 className="font-bold text-purple-900 mb-3">Select Import Format</h4>
+          <div className="grid grid-cols-3 gap-3">
+            <button
+              onClick={() => setImportFormat('csv')}
+              className={`p-4 rounded-xl border-2 transition-all ${
+                importFormat === 'csv'
+                  ? 'bg-purple-600 text-white border-purple-600'
+                  : 'bg-white text-gray-700 border-gray-300 hover:border-purple-400'
+              }`}
+            >
+              <FileSpreadsheet size={24} className="mx-auto mb-2" />
+              <div className="font-bold text-sm">CSV File</div>
+              <div className="text-xs opacity-80">.csv format</div>
+            </button>
+
+            <button
+              onClick={() => setImportFormat('json')}
+              className={`p-4 rounded-xl border-2 transition-all ${
+                importFormat === 'json'
+                  ? 'bg-purple-600 text-white border-purple-600'
+                  : 'bg-white text-gray-700 border-gray-300 hover:border-purple-400'
+              }`}
+            >
+              <Settings size={24} className="mx-auto mb-2" />
+              <div className="font-bold text-sm">JSON</div>
+              <div className="text-xs opacity-80">File or text</div>
+            </button>
+
+            <button
+              onClick={() => setImportFormat('excel')}
+              className={`p-4 rounded-xl border-2 transition-all ${
+                importFormat === 'excel'
+                  ? 'bg-purple-600 text-white border-purple-600'
+                  : 'bg-white text-gray-700 border-gray-300 hover:border-purple-400'
+              }`}
+            >
+              <FileSpreadsheet size={24} className="mx-auto mb-2" />
+              <div className="font-bold text-sm">Excel</div>
+              <div className="text-xs opacity-80">.xlsx format</div>
+            </button>
+          </div>
+        </div>
+
+        {/* Download Template */}
+        <div className="p-4 bg-blue-50 border-2 border-blue-200 rounded-xl">
+          <div className="flex items-start gap-3">
+            <Info className="text-blue-600 flex-shrink-0 mt-1" size={20} />
+            <div className="flex-1">
+              <h4 className="font-bold text-blue-900 mb-2">Step 1: Download Template</h4>
+              <p className="text-sm text-blue-800 mb-3">
+                Download the {importFormat.toUpperCase()} template and fill in your product data.
+              </p>
+              <button
+                onClick={() => {
+                  if (importFormat === 'csv') downloadTemplate();
+                  else if (importFormat === 'json') downloadJSONTemplate();
+                  else downloadExcelTemplate();
+                }}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-semibold"
+              >
+                <Download size={18} />
+                Download {importFormat.toUpperCase()} Template
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Upload/Input Section */}
+        {importFormat === 'json' ? (
+          <div className="p-4 bg-purple-50 border-2 border-purple-200 rounded-xl">
+            <h4 className="font-bold text-purple-900 mb-3">Step 2: Provide JSON Data</h4>
+            
+            <div className="flex gap-2 mb-3">
+              <button
+                onClick={() => setShowJsonEditor(!showJsonEditor)}
+                className={`flex-1 px-4 py-2 rounded-lg font-semibold transition ${
+                  showJsonEditor
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-white text-purple-700 border-2 border-purple-300'
+                }`}
+              >
+                <Settings size={18} className="inline mr-2" />
+                Paste JSON
+              </button>
+              <button
+                onClick={() => setShowJsonEditor(false)}
+                className={`flex-1 px-4 py-2 rounded-lg font-semibold transition ${
+                  !showJsonEditor
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-white text-purple-700 border-2 border-purple-300'
+                }`}
+              >
+                <Upload size={18} className="inline mr-2" />
+                Upload File
+              </button>
+            </div>
+
+            {showJsonEditor ? (
+              <textarea
+                value={jsonText}
+                onChange={(e) => setJsonText(e.target.value)}
+                placeholder='[{"name": "Cake Name", "description": "...", ...}]'
+                className="w-full h-64 px-4 py-3 border-2 border-purple-300 rounded-xl font-mono text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              />
+            ) : (
+              <>
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      setImportFile(file);
+                      setImportErrors([]);
+                    }
+                  }}
+                  className="w-full px-4 py-3 border-2 border-purple-300 rounded-xl focus:ring-2 focus:ring-purple-500"
+                />
+                {importFile && (
+                  <div className="mt-2 flex items-center gap-2 text-sm text-green-700">
+                    <CheckCircle size={16} />
+                    {importFile.name} ({(importFile.size / 1024).toFixed(2)} KB)
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="p-4 bg-purple-50 border-2 border-purple-200 rounded-xl">
+            <h4 className="font-bold text-purple-900 mb-3">
+              Step 2: Upload Your {importFormat.toUpperCase()} File
+            </h4>
+            <input
+              type="file"
+              accept={importFormat === 'csv' ? '.csv' : '.xlsx,.xls'}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  setImportFile(file);
+                  setImportErrors([]);
+                }
+              }}
+              className="w-full px-4 py-3 border-2 border-purple-300 rounded-xl focus:ring-2 focus:ring-purple-500"
+            />
+            {importFile && (
+              <div className="mt-2 flex items-center gap-2 text-sm text-green-700">
+                <CheckCircle size={16} />
+                {importFile.name} ({(importFile.size / 1024).toFixed(2)} KB)
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Progress, Errors, Instructions - Same as before */}
+        {importing && (
+          <div className="p-4 bg-green-50 border-2 border-green-200 rounded-xl">
+            <h4 className="font-bold text-green-900 mb-3">Importing Products...</h4>
+            <div className="w-full bg-gray-200 rounded-full h-4 overflow-hidden">
+              <div
+                className="bg-gradient-to-r from-green-500 to-green-600 h-full transition-all duration-300 flex items-center justify-center text-xs text-white font-bold"
+                style={{ width: `${importProgress}%` }}
+              >
+                {importProgress}%
+              </div>
+            </div>
+          </div>
+        )}
+
+        {importErrors.length > 0 && (
+          <div className="p-4 bg-red-50 border-2 border-red-200 rounded-xl max-h-60 overflow-y-auto">
+            <h4 className="font-bold text-red-900 mb-2 flex items-center gap-2">
+              <AlertCircle size={20} />
+              Import Errors ({importErrors.length})
+            </h4>
+            <ul className="space-y-1">
+              {importErrors.map((error, idx) => (
+                <li key={idx} className="text-sm text-red-700">• {error}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Action Buttons */}
+        <div className="flex gap-3">
+          <button
+            onClick={() => {
+              setImportModal(false);
+              setImportFile(null);
+              setJsonText('');
+              setImportErrors([]);
+            }}
+            className="flex-1 px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-300 transition-all"
+            disabled={importing}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleMultiFormatImport}
+            disabled={(importFormat === 'json' ? !importFile && !jsonText : !importFile) || importing}
+            className="flex-1 px-4 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-xl font-semibold hover:from-purple-700 hover:to-pink-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            {importing ? (
+              <>
+                <RefreshCw className="animate-spin" size={18} />
+                Importing...
+              </>
+            ) : (
+              <>
+                <Upload size={18} />
+                Import Products
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+)}
+
+
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
@@ -547,6 +1187,13 @@ export default function AdminProducts() {
             <RefreshCw size={18} />
           </button>
           <button
+  onClick={() => setImportModal(true)}
+  className="flex items-center gap-2 px-4 py-2.5 bg-purple-600 text-white rounded-xl hover:bg-purple-700 transition-all font-semibold shadow-lg"
+>
+  <Upload size={18} />
+  <span className="hidden sm:inline">Import CSV</span>
+</button>
+          <button
             onClick={() => {
               if (showForm) {
                 resetForm();
@@ -561,7 +1208,7 @@ export default function AdminProducts() {
           </button>
         </div>
       </div>
-
+  
       {/* Enhanced Stats Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
         <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-4 border-2 border-blue-200">

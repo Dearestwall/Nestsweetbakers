@@ -1,16 +1,15 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { collection, getDocs, updateDoc, deleteDoc, doc, orderBy, query, serverTimestamp, writeBatch, where, addDoc } from 'firebase/firestore';
+import { collection, getDocs, updateDoc, deleteDoc, doc, orderBy, query, serverTimestamp, writeBatch, addDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/context/ToastContext';
-import { notificationService } from '@/lib/notificationService';
 import {
   Package, Search, Download, Phone, Mail, MapPin, Calendar, Loader2, Eye,
   ChevronDown, ChevronUp, Trash2, CheckSquare, Square, Grid3x3, List, Printer,
   RefreshCw, Clock, CheckCircle, XCircle, AlertCircle, Gift, FileText, CreditCard,
   Truck, User, ShoppingCart, DollarSign, MessageCircle, TrendingUp, Percent, Info, 
-  Send, Edit2, ExternalLink, Bell, Zap, Filter
+  Send, Edit2, ExternalLink, Bell, Zap, Filter, Plus, Star
 } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -77,6 +76,7 @@ interface Order {
   orderStatus: string;
   trackingSteps: TrackingSteps;
   source: string;
+  customRequestId?: string;
   deviceInfo?: any;
   createdAt: any;
   updatedAt?: any;
@@ -115,9 +115,10 @@ export default function AdminOrdersPage() {
   const [confirmModal, setConfirmModal] = useState<{
     show: boolean;
     id: string | string[];
-    type: 'delete' | 'status';
+    type: 'delete' | 'status' | 'addProduct';
     status?: string;
     isBulk?: boolean;
+    order?: Order;
   }>({ show: false, id: '', type: 'delete', isBulk: false });
 
   const { showSuccess, showError } = useToast();
@@ -239,7 +240,7 @@ export default function AdminOrdersPage() {
       `━━━━━━━━━━━━━━━━\n` +
       `Order ID: #${order.orderRef}\n` +
       `Items: ${order.items.map(i => `${i.cakeName} (${i.weight})`).join(', ')}\n` +
-      `Total Amount: Rs ${order.total}\n` +
+      `Total Amount: ₹${order.total}\n` +
       `Delivery Date: ${new Date(order.deliveryDate).toLocaleDateString('en-IN')}\n` +
       `Delivery Time: ${order.deliveryTime === 'morning' ? '9 AM - 12 PM' : order.deliveryTime === 'afternoon' ? '12 PM - 4 PM' : '4 PM - 8 PM'}\n\n` +
       `Thank you for choosing NestSweet Bakers!\n\n` +
@@ -248,7 +249,7 @@ export default function AdminOrdersPage() {
     return message;
   };
 
-  // ✅ Create in-app notification
+  // Create in-app notification
   const createNotification = async (order: Order, newStatus: string, oldStatus: string) => {
     if (!order.userId || oldStatus === newStatus) return;
 
@@ -290,14 +291,12 @@ export default function AdminOrdersPage() {
         createdAt: serverTimestamp(),
         actionUrl: `/orders`,
       });
-
-      console.log('✅ Notification created for user:', order.userId);
     } catch (error) {
       console.error('Error creating notification:', error);
     }
   };
 
-  // Updated: Show WhatsApp modal before status update
+  // Update status
   const updateOrderStatus = async (orderId: string, newStatus: string, skipConfirm = false, customMessage?: string) => {
     if (!skipConfirm && (newStatus === 'cancelled' || newStatus === 'completed')) {
       setConfirmModal({ show: true, id: orderId, type: 'status', status: newStatus, isBulk: false });
@@ -331,21 +330,9 @@ export default function AdminOrdersPage() {
         o.id === orderId ? { ...o, status: newStatus as any } : o
       ));
 
-      // ✅ Create in-app notification
+      // Create in-app notification
       if (order && oldStatus) {
         await createNotification(order, newStatus, oldStatus);
-      }
-
-      // Send Firebase notification
-      if (order && oldStatus !== newStatus && order.userId) {
-        notificationService.notifyOrderStatusChange({
-          orderId,
-          userId: order.userId,
-          customerName: order.userName,
-          cakeName: order.items[0]?.cakeName || 'Order',
-          oldStatus: oldStatus!,
-          newStatus,
-        }).catch(err => console.error('Failed to send notification', err));
       }
 
       showSuccess(`✅ Order status updated to ${newStatus}`);
@@ -373,6 +360,68 @@ export default function AdminOrdersPage() {
         whatsappModal.message
       );
       setWhatsappModal({ show: false, order: null, newStatus: '', message: '' });
+    }
+  };
+
+  // Add custom cake to products
+  const addToProducts = async (order: Order) => {
+    if (!order.items[0] || order.source !== 'custom_request') {
+      showError('This is not a custom cake order');
+      return;
+    }
+
+    setConfirmModal({ 
+      show: true, 
+      id: order.id, 
+      type: 'addProduct',
+      order 
+    });
+  };
+
+  const handleAddToProducts = async () => {
+    if (!confirmModal.order) return;
+
+    const order = confirmModal.order;
+    const customCake = order.items[0];
+
+    try {
+      const productData = {
+        name: customCake.cakeName,
+        slug: customCake.cakeName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''),
+        description: `Custom ${order.occasionType || 'Occasion'} Cake - ${customCake.flavor} flavor`,
+        imageUrl: customCake.cakeImage || 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=800',
+        category: customCake.category || 'Custom',
+        flavor: customCake.flavor || 'Custom',
+        basePrice: customCake.basePrice,
+        sizes: [
+          { weight: customCake.weight, price: customCake.basePrice }
+        ],
+        tags: ['custom', order.occasionType?.toLowerCase() || 'special', customCake.flavor?.toLowerCase() || 'delicious'],
+        availability: true,
+        featured: false,
+        orderCount: 1,
+        rating: 5,
+        reviews: 0,
+        
+        // Custom cake specific fields
+        isCustomDesign: true,
+        customizationOptions: order.specialInstructions || customCake.customization,
+        originalOrderId: order.id,
+        originalOrderRef: order.orderRef,
+        createdFromCustomRequest: true,
+        customRequestId: order.customRequestId,
+        
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+
+      await addDoc(collection(db, 'products'), productData);
+
+      showSuccess('✅ Custom cake added to products successfully!');
+      setConfirmModal({ show: false, id: '', type: 'delete', isBulk: false });
+    } catch (error) {
+      console.error('Error adding to products:', error);
+      showError('Failed to add to products');
     }
   };
 
@@ -529,7 +578,7 @@ export default function AdminOrdersPage() {
   };
 
   const exportToCSV = () => {
-    const headers = ['Order Ref', 'Order Date', 'Customer', 'Phone', 'Email', 'Items', 'Quantity', 'Total', 'Payment', 'Status', 'Delivery Date', 'Gift', 'Promo'];
+    const headers = ['Order Ref', 'Order Date', 'Customer', 'Phone', 'Email', 'Items', 'Quantity', 'Total', 'Payment', 'Status', 'Delivery Date', 'Gift', 'Promo', 'Source'];
     const rows = filteredOrders.map(order => [
       order.orderRef,
       new Date(order.createdAt).toLocaleDateString('en-IN'),
@@ -543,7 +592,8 @@ export default function AdminOrdersPage() {
       order.status,
       new Date(order.deliveryDate).toLocaleDateString('en-IN'),
       order.isGift ? 'Yes' : 'No',
-      order.promoCode || ''
+      order.promoCode || '',
+      order.source || 'web'
     ]);
 
     const csvContent = [headers, ...rows.map(row => row.map(cell => `"${cell}"`).join(','))].join('\n');
@@ -567,14 +617,13 @@ export default function AdminOrdersPage() {
     return <StatusIcon size={16} />;
   };
 
-  // Simple WhatsApp message without status update
   const generateWhatsAppMessage = (order: Order) => {
     const message = 
       `Hello ${order.userName},\n\n` +
       `Your order #${order.orderRef} has been received!\n\n` +
       `ORDER DETAILS:\n` +
       order.items.map(item => `• ${item.cakeName} (${item.weight}) x${item.quantity}`).join('\n') +
-      `\n\nTotal: Rs ${order.total}\n` +
+      `\n\nTotal: ₹${order.total}\n` +
       `Delivery: ${new Date(order.deliveryDate).toLocaleDateString('en-IN')}\n` +
       `Time: ${order.deliveryTime === 'morning' ? '9 AM - 12 PM' : order.deliveryTime === 'afternoon' ? '12 PM - 4 PM' : '4 PM - 8 PM'}\n\n` +
       `We'll keep you updated on your order status.\n\n` +
@@ -589,6 +638,7 @@ export default function AdminOrdersPage() {
     completed: orders.filter(o => o.status === 'completed').length,
     cancelled: orders.filter(o => o.status === 'cancelled').length,
     totalRevenue: orders.filter(o => o.status === 'completed').reduce((sum, o) => sum + o.total, 0),
+    customOrders: orders.filter(o => o.source === 'custom_request').length,
   };
 
   if (loading) {
@@ -647,9 +697,6 @@ export default function AdminOrdersPage() {
                 className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none font-mono text-sm"
                 placeholder="Edit message before sending..."
               />
-              <p className="text-xs text-gray-500 mt-2">
-                You can edit this message before sending to the customer
-              </p>
             </div>
 
             <div className="flex gap-3">
@@ -678,15 +725,27 @@ export default function AdminOrdersPage() {
       {confirmModal.show && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in">
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 animate-scale-up">
-            <div className="w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <AlertCircle className="text-yellow-600" size={32} />
+            <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${
+              confirmModal.type === 'addProduct' ? 'bg-purple-100' : 'bg-yellow-100'
+            }`}>
+              {confirmModal.type === 'addProduct' ? (
+                <Plus className="text-purple-600" size={32} />
+              ) : (
+                <AlertCircle className={confirmModal.type === 'delete' ? 'text-red-600' : 'text-yellow-600'} size={32} />
+              )}
             </div>
             <h3 className="text-2xl font-bold text-center text-gray-800 mb-2">
-              {confirmModal.type === 'delete' ? 'Delete Orders?' : 'Update Order Status?'}
+              {confirmModal.type === 'delete' 
+                ? 'Delete Orders?' 
+                : confirmModal.type === 'addProduct'
+                ? 'Add to Products?'
+                : 'Update Order Status?'}
             </h3>
             <p className="text-gray-600 text-center mb-6">
               {confirmModal.type === 'delete'
                 ? `Are you sure you want to delete ${confirmModal.isBulk ? `${selectedOrders.size} orders` : 'this order'}? This action cannot be undone.`
+                : confirmModal.type === 'addProduct'
+                ? `Add "${confirmModal.order?.items[0]?.cakeName}" to the products catalog? This will make it available for regular orders.`
                 : `Update order status to "${confirmModal.status}"?`}
             </p>
             <div className="flex gap-3">
@@ -702,12 +761,20 @@ export default function AdminOrdersPage() {
                     handleBulkDelete();
                   } else if (confirmModal.type === 'status' && confirmModal.status) {
                     updateOrderStatus(confirmModal.id as string, confirmModal.status, true);
+                  } else if (confirmModal.type === 'addProduct') {
+                    handleAddToProducts();
                   }
-                  setConfirmModal({ show: false, id: '', type: 'delete', isBulk: false });
+                  if (confirmModal.type !== 'addProduct') {
+                    setConfirmModal({ show: false, id: '', type: 'delete', isBulk: false });
+                  }
                 }}
-                className="flex-1 px-4 py-3 bg-pink-600 text-white rounded-xl font-semibold hover:bg-pink-700 transition-all"
+                className={`flex-1 px-4 py-3 text-white rounded-xl font-semibold transition-all ${
+                  confirmModal.type === 'addProduct' 
+                    ? 'bg-purple-600 hover:bg-purple-700'
+                    : 'bg-pink-600 hover:bg-pink-700'
+                }`}
               >
-                Confirm
+                {confirmModal.type === 'addProduct' ? 'Add to Products' : 'Confirm'}
               </button>
             </div>
           </div>
@@ -745,7 +812,7 @@ export default function AdminOrdersPage() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
         <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl shadow-lg p-4 border-2 border-gray-200">
           <p className="text-gray-600 text-sm font-medium">Total Orders</p>
           <p className="text-2xl font-bold text-gray-800 mt-1">{stats.total}</p>
@@ -774,6 +841,11 @@ export default function AdminOrdersPage() {
         <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl shadow-lg p-4 border-2 border-purple-200">
           <p className="text-purple-700 text-sm font-medium">Revenue</p>
           <p className="text-2xl font-bold text-purple-800 mt-1">₹{stats.totalRevenue.toFixed(0)}</p>
+        </div>
+
+        <div className="bg-gradient-to-br from-pink-50 to-pink-100 rounded-xl shadow-lg p-4 border-2 border-pink-200">
+          <p className="text-pink-700 text-sm font-medium">Custom</p>
+          <p className="text-2xl font-bold text-pink-800 mt-1">{stats.customOrders}</p>
         </div>
       </div>
 
@@ -960,6 +1032,12 @@ export default function AdminOrdersPage() {
                             Gift
                           </span>
                         )}
+                        {order.source === 'custom_request' && (
+                          <span className="px-2 py-1 bg-orange-100 text-orange-700 rounded-full text-xs font-semibold flex items-center gap-1">
+                            <Star size={12} />
+                            Custom
+                          </span>
+                        )}
                       </div>
                       <p className="text-sm text-gray-600">{order.userName}</p>
                       <p className="text-xs text-gray-500">
@@ -969,99 +1047,43 @@ export default function AdminOrdersPage() {
                   </div>
 
                   <div className="flex flex-col items-end gap-1">
-                    <p className="text-xl font-bold text-pink-600">₹{order.total.toFixed(2)}</p>
-                    <div className="flex gap-1">
-                      <button
-                        onClick={() => printInvoice(order)}
-                        className="p-1.5 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-                        title="Print Invoice"
-                      >
-                        <Printer size={14} />
-                      </button>
-                      <button
-                        onClick={() => setExpandedOrder(expandedOrder === order.id ? null : order.id)}
-                        className="p-1.5 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-                      >
-                        {expandedOrder === order.id ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                      </button>
-                    </div>
+                    <p className="text-xl font-bold text-pink-600">₹{order.total}</p>
+                    <button
+                      onClick={() => setExpandedOrder(expandedOrder === order.id ? null : order.id)}
+                      className="p-1.5 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                    >
+                      {expandedOrder === order.id ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                    </button>
                   </div>
                 </div>
 
-                {/* Order Items Preview */}
-                <div className="flex gap-2 flex-wrap">
-                  {order.items.slice(0, 3).map((item, idx) => (
-                    <div key={idx} className="flex items-center gap-2 bg-gray-50 rounded-lg px-2 py-1 text-xs">
+                {/* Quick Info */}
+                <div className="space-y-2 text-xs">
+                  {order.items.map((item, idx) => (
+                    <div key={idx} className="flex items-center gap-2 bg-gray-50 rounded-lg px-2 py-1">
                       {item.cakeImage && (
-                        <div className="relative w-6 h-6 rounded overflow-hidden">
-                          <Image
-                            src={item.cakeImage}
+                        <div className="relative w-8 h-8 rounded overflow-hidden flex-shrink-0">
+                          <Image 
+                            src={item.cakeImage} 
                             alt={item.cakeName}
                             fill
                             className="object-cover"
-                            sizes="24px"
+                            sizes="32px"
                           />
                         </div>
                       )}
-                      <span className="font-medium">{item.cakeName}</span>
-                      <span className="text-gray-500">×{item.quantity}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold truncate">{item.cakeName}</p>
+                        <p className="text-gray-500">{item.weight} · ₹{item.totalPrice}</p>
+                      </div>
                     </div>
                   ))}
-                  {order.items.length > 3 && (
-                    <span className="text-xs text-gray-500 px-2 py-1">+{order.items.length - 3} more</span>
-                  )}
                 </div>
               </div>
 
               {/* Expanded Details */}
               {expandedOrder === order.id && (
                 <div className="p-4 md:p-6 bg-gray-50 space-y-6">
-                  {/* Order Items */}
-                  <div>
-                    <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
-                      <ShoppingCart size={18} className="text-pink-600" />
-                      Order Items ({order.items.length})
-                    </h4>
-                    <div className="space-y-2">
-                      {order.items.map((item, idx) => (
-                        <div key={idx} className="bg-white rounded-lg p-3 flex gap-3">
-                          {item.cakeImage && (
-                            <div className="relative w-16 h-16 rounded-lg overflow-hidden flex-shrink-0">
-                              <Image
-                                src={item.cakeImage}
-                                alt={item.cakeName}
-                                fill
-                                className="object-cover"
-                                sizes="64px"
-                              />
-                            </div>
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <p className="font-semibold text-sm">{item.cakeName}</p>
-                            <div className="flex items-center gap-2 text-xs text-gray-600 mt-1">
-                              {item.flavor && (
-                                <span className="bg-gray-100 px-2 py-0.5 rounded">{item.flavor}</span>
-                              )}
-                              {item.category && (
-                                <span className="bg-pink-100 text-pink-700 px-2 py-0.5 rounded">{item.category}</span>
-                              )}
-                              <span className="font-medium">{item.weight}</span>
-                            </div>
-                            {item.customization && (
-                              <p className="text-xs text-purple-700 bg-purple-50 px-2 py-1 rounded mt-1">
-                                {item.customization}
-                              </p>
-                            )}
-                          </div>
-                          <div className="text-right">
-                            <p className="font-bold text-pink-600">₹{item.totalPrice}</p>
-                            <p className="text-xs text-gray-500">₹{item.basePrice}/kg</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
                   {/* Customer & Delivery Info */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
@@ -1070,23 +1092,21 @@ export default function AdminOrdersPage() {
                         Customer Details
                       </h4>
                       <div className="space-y-2 text-sm bg-white rounded-lg p-3">
-                        {order.userPhone && (
-                          <div className="flex items-start gap-2">
-                            <Phone className="text-gray-400 flex-shrink-0 mt-0.5" size={14} />
-                            <div>
-                              <p className="text-xs text-gray-500">Phone</p>
-                              <a href={`tel:${order.userPhone}`} className="font-semibold text-pink-600 hover:text-pink-700">
-                                {order.userPhone}
-                              </a>
-                            </div>
+                        <div className="flex items-start gap-2">
+                          <Phone className="text-gray-400 flex-shrink-0 mt-0.5" size={14} />
+                          <div>
+                            <p className="text-xs text-gray-500">Phone</p>
+                            <a href={`tel:${order.userPhone}`} className="font-semibold text-pink-600 hover:text-pink-700">
+                              {order.userPhone}
+                            </a>
                           </div>
-                        )}
+                        </div>
                         {order.userEmail && (
                           <div className="flex items-start gap-2">
                             <Mail className="text-gray-400 flex-shrink-0 mt-0.5" size={14} />
                             <div>
                               <p className="text-xs text-gray-500">Email</p>
-                              <p className="font-semibold break-all">{order.userEmail}</p>
+                              <p className="font-semibold break-all text-xs">{order.userEmail}</p>
                             </div>
                           </div>
                         )}
@@ -1094,10 +1114,7 @@ export default function AdminOrdersPage() {
                           <MapPin className="text-gray-400 flex-shrink-0 mt-0.5" size={14} />
                           <div>
                             <p className="text-xs text-gray-500">Address</p>
-                            <p className="font-semibold">{order.deliveryAddress}</p>
-                            {order.customerInfo.city && (
-                              <p className="text-xs text-gray-600">{order.customerInfo.city}, {order.customerInfo.pincode}</p>
-                            )}
+                            <p className="font-semibold text-xs">{order.deliveryAddress}</p>
                           </div>
                         </div>
                       </div>
@@ -1122,128 +1139,46 @@ export default function AdminOrdersPage() {
                         <div className="flex justify-between">
                           <span className="text-gray-600">Time</span>
                           <span className="font-semibold">
-                            {order.deliveryTime === 'morning' ? '9 AM - 12 PM' : 
-                             order.deliveryTime === 'afternoon' ? '12 PM - 4 PM' : '4 PM - 8 PM'}
+                            {order.deliveryTime === 'morning' ? '9 AM - 12 PM' : order.deliveryTime === 'afternoon' ? '12 PM - 4 PM' : '4 PM - 8 PM'}
                           </span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-gray-600">Payment</span>
                           <span className="font-semibold uppercase">{order.paymentMethod}</span>
                         </div>
-                        {order.source && (
-                          <div className="flex justify-between">
-                            <span className="text-gray-600">Source</span>
-                            <span className="font-semibold capitalize">{order.source}</span>
-                          </div>
-                        )}
                       </div>
                     </div>
                   </div>
-
-                  {/* Gift Info */}
-                  {order.isGift && (
-                    <div>
-                      <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
-                        <Gift size={18} className="text-purple-600" />
-                        Gift Information
-                      </h4>
-                      <div className="bg-purple-50 rounded-lg p-3 space-y-2 text-sm border border-purple-200">
-                        <div className="flex justify-between">
-                          <span className="text-gray-700">Recipient</span>
-                          <span className="font-semibold">{order.recipientName}</span>
-                        </div>
-                        {order.occasionType && (
-                          <div className="flex justify-between">
-                            <span className="text-gray-700">Occasion</span>
-                            <span className="font-semibold capitalize">{order.occasionType}</span>
-                          </div>
-                        )}
-                        {order.giftMessage && (
-                          <div className="pt-2 border-t border-purple-200">
-                            <p className="text-xs text-gray-600 mb-1">Gift Message</p>
-                            <p className="italic text-gray-800">&quot;{order.giftMessage}&quot;</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
 
                   {/* Special Instructions */}
                   {(order.specialInstructions || order.orderNote) && (
                     <div>
                       <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
                         <FileText size={18} className="text-blue-600" />
-                        Notes & Instructions
+                        Special Instructions
                       </h4>
-                      <div className="bg-blue-50 rounded-lg p-3 space-y-2 text-sm border border-blue-200">
+                      <div className="bg-blue-50 rounded-xl p-3 border-2 border-blue-200">
                         {order.specialInstructions && (
-                          <div>
-                            <p className="text-xs text-gray-600 mb-1">Special Instructions</p>
-                            <p className="text-gray-800">{order.specialInstructions}</p>
-                          </div>
+                          <p className="text-gray-700 text-sm mb-2">{order.specialInstructions}</p>
                         )}
                         {order.orderNote && (
-                          <div className={order.specialInstructions ? 'pt-2 border-t border-blue-200' : ''}>
-                            <p className="text-xs text-gray-600 mb-1">Order Note</p>
-                            <p className="text-gray-800">{order.orderNote}</p>
-                          </div>
+                          <p className="text-gray-700 text-sm"><strong>Note:</strong> {order.orderNote}</p>
                         )}
                       </div>
                     </div>
                   )}
 
-                  {/* Price Breakdown */}
-                  <div>
-                    <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
-                      <DollarSign size={18} className="text-green-600" />
-                      Payment Breakdown
-                    </h4>
-                    <div className="bg-white rounded-lg p-3 space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Subtotal</span>
-                        <span className="font-semibold">₹{order.subtotal}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Delivery Fee</span>
-                        <span className="font-semibold">{order.deliveryFee === 0 ? 'FREE' : `₹${order.deliveryFee}`}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Packaging Fee</span>
-                        <span className="font-semibold">₹{order.packagingFee}</span>
-                      </div>
-                      {order.tax > 0 && (
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Tax</span>
-                          <span className="font-semibold">₹{order.tax.toFixed(2)}</span>
-                        </div>
-                      )}
-                      {order.discount > 0 && (
-                        <div className="flex justify-between text-green-600">
-                          <span className="flex items-center gap-1">
-                            <Percent size={14} />
-                            Discount {order.promoCode && `(${order.promoCode})`}
-                          </span>
-                          <span className="font-semibold">-₹{order.discount}</span>
-                        </div>
-                      )}
-                      <div className="flex justify-between border-t-2 border-gray-200 pt-2">
-                        <span className="font-bold text-base">Total</span>
-                        <span className="font-bold text-lg text-pink-600">₹{order.total.toFixed(2)}</span>
-                      </div>
-                    </div>
-                  </div>
-
                   {/* Status Update */}
                   <div>
                     <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
                       <Zap size={18} className="text-orange-600" />
-                      Update Order Status
+                      Update Status
                     </h4>
                     <select
                       value={order.status}
                       onChange={(e) => updateOrderStatus(order.id, e.target.value)}
                       disabled={updating === order.id}
-                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all disabled:opacity-50 disabled:cursor-not-allowed font-semibold"
+                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all disabled:opacity-50 font-semibold"
                     >
                       {STATUS_OPTIONS.map(status => (
                         <option key={status.value} value={status.value}>
@@ -1263,13 +1198,27 @@ export default function AdminOrdersPage() {
                     </p>
                   </div>
 
-                  {/* Contact Actions */}
-                  <div className="flex gap-2">
+                  {/* Action Buttons */}
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                    <Link
+                      href={`/admin/orders/${order.id}`}
+                      className="flex items-center justify-center gap-2 px-4 py-3 bg-pink-600 text-white rounded-lg hover:bg-pink-700 transition font-semibold"
+                    >
+                      <Eye size={18} />
+                      View
+                    </Link>
+                    <button
+                      onClick={() => printInvoice(order)}
+                      className="flex items-center justify-center gap-2 px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition font-semibold"
+                    >
+                      <Printer size={18} />
+                      Print
+                    </button>
                     {order.userPhone && (
                       <>
                         <a
                           href={`tel:${order.userPhone}`}
-                          className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-semibold"
+                          className="flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-semibold"
                         >
                           <Phone size={18} />
                           Call
@@ -1278,12 +1227,21 @@ export default function AdminOrdersPage() {
                           href={`https://wa.me/${order.userPhone.replace(/[^0-9]/g, '')}?text=${generateWhatsAppMessage(order)}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-semibold"
+                          className="flex items-center justify-center gap-2 px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-semibold"
                         >
                           <MessageCircle size={18} />
                           WhatsApp
                         </a>
                       </>
+                    )}
+                    {order.source === 'custom_request' && (
+                      <button
+                        onClick={() => addToProducts(order)}
+                        className="flex items-center justify-center gap-2 px-4 py-3 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition font-semibold col-span-2"
+                      >
+                        <Plus size={18} />
+                        Add to Products
+                      </button>
                     )}
                   </div>
                 </div>
@@ -1295,27 +1253,15 @@ export default function AdminOrdersPage() {
 
       <style jsx global>{`
         @keyframes fade-in {
-          from {
-            opacity: 0;
-            transform: translateY(20px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
+          from { opacity: 0; transform: translateY(20px); }
+          to { opacity: 1; transform: translateY(0); }
         }
-
+        
         @keyframes scale-up {
-          from {
-            opacity: 0;
-            transform: scale(0.9);
-          }
-          to {
-            opacity: 1;
-            transform: scale(1);
-          }
+          from { opacity: 0; transform: scale(0.9); }
+          to { opacity: 1; transform: scale(1); }
         }
-
+        
         .animate-fade-in {
           animation: fade-in 0.6s ease-out;
         }

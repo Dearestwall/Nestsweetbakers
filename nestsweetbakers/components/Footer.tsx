@@ -1,73 +1,27 @@
 'use client';
 
 import Link from 'next/link';
-import { Instagram, Facebook, Phone, Mail, MapPin, Twitter, Youtube } from 'lucide-react';
-import { useState, useEffect } from 'react';
-import { collection, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
+import { Instagram, Facebook, Phone, Mail, MapPin, Twitter, Youtube, Linkedin } from 'lucide-react';
+import { useState } from 'react';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/context/ToastContext';
-
-interface FooterContent {
-  companyName: string;
-  tagline: string;
-  phone: string;
-  email: string;
-  address: string;
-  social: {
-    instagram?: string;
-    facebook?: string;
-    twitter?: string;
-    youtube?: string;
-  };
-  newsletter: {
-    enabled: boolean;
-    title: string;
-    subtitle: string;
-  };
-}
+import { useSettings } from '@/hooks/useSettings';
 
 export default function Footer() {
-  const [content, setContent] = useState<FooterContent>({
-    companyName: 'NestSweets',
-    tagline: 'Crafting sweet memories with every bite. Fresh, custom-made cakes for all your celebrations.',
-    phone: '+91 98765 43210',
-    email: 'hello@nestsweets.com',
-    address: 'Narnaund, Haryana, India',
-    social: {
-      instagram: 'https://instagram.com/nestsweets',
-      facebook: 'https://facebook.com/nestsweets',
-      twitter: 'https://twitter.com/nestsweets',
-      youtube: 'https://youtube.com/@nestsweets',
-    },
-    newsletter: {
-      enabled: true,
-      title: 'Stay Sweet with Us',
-      subtitle: 'Get special offers and updates',
-    },
-  });
-
+  const { settings, loading } = useSettings();
   const [email, setEmail] = useState('');
   const [subscribing, setSubscribing] = useState(false);
   const { showSuccess, showError } = useToast();
 
-  useEffect(() => {
-    async function fetchFooterContent() {
-      try {
-        const footerRef = collection(db, 'footerContent');
-        const snapshot = await getDocs(footerRef);
-        if (!snapshot.empty) {
-          const data = snapshot.docs[0].data() as FooterContent;
-          setContent(data);
-        }
-      } catch (error) {
-        console.error('Error fetching footer content:', error);
-      }
-    }
-    fetchFooterContent();
-  }, []);
-
   const handleNewsletterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!settings.features.enableNewsletter) {
+      showError('Newsletter subscription is currently disabled');
+      return;
+    }
+    
     setSubscribing(true);
     
     try {
@@ -97,8 +51,8 @@ export default function Footer() {
     { label: 'Contact Us', href: '/contact' },
     { label: 'FAQs', href: '/faq' },
     { label: 'Track Order', href: '/track-order' },
-     { label: 'Claim Order', href: '/claim-order' },
-    { label: 'Orders', href: '/order' },
+    { label: 'Claim Order', href: '/claim-order' },
+    { label: 'Orders', href: '/orders' },
   ];
 
   const legalLinks = [
@@ -107,6 +61,17 @@ export default function Footer() {
     { label: 'Refund Policy', href: '/refund' },
     { label: 'Cookie Policy', href: '/cookies' },
   ];
+
+  // Show loading state or default content if settings are loading
+  if (loading) {
+    return (
+      <footer className="bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white py-12">
+        <div className="container mx-auto px-4 text-center">
+          <div className="animate-pulse">Loading...</div>
+        </div>
+      </footer>
+    );
+  }
 
   return (
     <footer className="bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white relative overflow-hidden">
@@ -117,25 +82,27 @@ export default function Footer() {
       </div>
 
       <div className="container mx-auto px-4 py-12 md:py-16 relative z-10">
-      
+       
 
         {/* Main Footer Content */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-8 mb-12">
-          {/* About Section - Takes more space */}
+          {/* About Section */}
           <div className="lg:col-span-4">
             <Link href="/" className="flex items-center space-x-2 mb-4 group">
               <span className="text-4xl group-hover:scale-110 transition-transform">🍰</span>
               <span className="text-2xl font-bold text-pink-400 group-hover:text-pink-300 transition-colors">
-                {content.companyName}
+                {settings.businessName}
               </span>
             </Link>
             <p className="text-gray-400 mb-6 leading-relaxed">
-              {content.tagline}
+              {settings.tagline}
             </p>
+            
+            {/* Social Media Links */}
             <div className="flex flex-wrap gap-3">
-              {content.social.instagram && (
+              {settings.socialMedia.instagram && (
                 <a
-                  href={content.social.instagram}
+                  href={settings.socialMedia.instagram}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="bg-pink-600 p-3 rounded-full hover:bg-pink-700 transition-all transform hover:scale-110 shadow-lg hover:shadow-pink-500/50"
@@ -144,9 +111,9 @@ export default function Footer() {
                   <Instagram size={20} />
                 </a>
               )}
-              {content.social.facebook && (
+              {settings.socialMedia.facebook && (
                 <a
-                  href={content.social.facebook}
+                  href={settings.socialMedia.facebook}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="bg-blue-600 p-3 rounded-full hover:bg-blue-700 transition-all transform hover:scale-110 shadow-lg hover:shadow-blue-500/50"
@@ -155,9 +122,9 @@ export default function Footer() {
                   <Facebook size={20} />
                 </a>
               )}
-              {content.social.twitter && (
+              {settings.socialMedia.twitter && (
                 <a
-                  href={content.social.twitter}
+                  href={settings.socialMedia.twitter}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="bg-sky-600 p-3 rounded-full hover:bg-sky-700 transition-all transform hover:scale-110 shadow-lg hover:shadow-sky-500/50"
@@ -166,9 +133,9 @@ export default function Footer() {
                   <Twitter size={20} />
                 </a>
               )}
-              {content.social.youtube && (
+              {settings.socialMedia.youtube && (
                 <a
-                  href={content.social.youtube}
+                  href={settings.socialMedia.youtube}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="bg-red-600 p-3 rounded-full hover:bg-red-700 transition-all transform hover:scale-110 shadow-lg hover:shadow-red-500/50"
@@ -177,10 +144,21 @@ export default function Footer() {
                   <Youtube size={20} />
                 </a>
               )}
+              {settings.socialMedia.linkedin && (
+                <a
+                  href={settings.socialMedia.linkedin}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="bg-blue-700 p-3 rounded-full hover:bg-blue-800 transition-all transform hover:scale-110 shadow-lg hover:shadow-blue-500/50"
+                  aria-label="Connect on LinkedIn"
+                >
+                  <Linkedin size={20} />
+                </a>
+              )}
             </div>
           </div>
 
-          {/* Links Section - Horizontal on mobile, Vertical on desktop */}
+          {/* Links Section */}
           <div className="lg:col-span-8">
             {/* Desktop Layout */}
             <div className="hidden md:grid md:grid-cols-3 gap-8">
@@ -226,27 +204,26 @@ export default function Footer() {
                 <ul className="space-y-4">
                   <li className="flex items-start space-x-3 text-gray-400 group">
                     <Phone size={20} className="text-pink-400 mt-0.5 group-hover:scale-110 transition-transform flex-shrink-0" />
-                    <a href={`tel:${content.phone}`} className="hover:text-pink-400 transition-colors">
-                      {content.phone}
+                    <a href={`tel:${settings.phone}`} className="hover:text-pink-400 transition-colors">
+                      {settings.phone}
                     </a>
                   </li>
                   <li className="flex items-start space-x-3 text-gray-400 group">
                     <Mail size={20} className="text-pink-400 mt-0.5 group-hover:scale-110 transition-transform flex-shrink-0" />
-                    <a href={`mailto:${content.email}`} className="hover:text-pink-400 transition-colors break-all">
-                      {content.email}
+                    <a href={`mailto:${settings.email}`} className="hover:text-pink-400 transition-colors break-all">
+                      {settings.email}
                     </a>
                   </li>
                   <li className="flex items-start space-x-3 text-gray-400 group">
                     <MapPin size={20} className="text-pink-400 mt-0.5 group-hover:scale-110 transition-transform flex-shrink-0" />
-                    <span>{content.address}</span>
+                    <span>{settings.address}</span>
                   </li>
                 </ul>
               </div>
             </div>
 
-            {/* Mobile Layout - Horizontal Tables */}
+            {/* Mobile Layout */}
             <div className="md:hidden space-y-6">
-              {/* Company & Support in 2 columns */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <h4 className="text-base font-bold mb-3 text-pink-400">Company</h4>
@@ -281,25 +258,25 @@ export default function Footer() {
                 </div>
               </div>
 
-              {/* Contact Info */}
+              {/* Contact Info Mobile */}
               <div>
                 <h4 className="text-base font-bold mb-3 text-pink-400">Contact</h4>
                 <ul className="space-y-3">
                   <li className="flex items-center space-x-3 text-gray-400">
                     <Phone size={18} className="text-pink-400 flex-shrink-0" />
-                    <a href={`tel:${content.phone}`} className="hover:text-pink-400 transition-colors text-sm">
-                      {content.phone}
+                    <a href={`tel:${settings.phone}`} className="hover:text-pink-400 transition-colors text-sm">
+                      {settings.phone}
                     </a>
                   </li>
                   <li className="flex items-center space-x-3 text-gray-400">
                     <Mail size={18} className="text-pink-400 flex-shrink-0" />
-                    <a href={`mailto:${content.email}`} className="hover:text-pink-400 transition-colors text-sm break-all">
-                      {content.email}
+                    <a href={`mailto:${settings.email}`} className="hover:text-pink-400 transition-colors text-sm break-all">
+                      {settings.email}
                     </a>
                   </li>
                   <li className="flex items-start space-x-3 text-gray-400">
                     <MapPin size={18} className="text-pink-400 mt-0.5 flex-shrink-0" />
-                    <span className="text-sm">{content.address}</span>
+                    <span className="text-sm">{settings.address}</span>
                   </li>
                 </ul>
               </div>
@@ -307,7 +284,7 @@ export default function Footer() {
           </div>
         </div>
 
-        {/* Legal Links - Horizontal on all screens */}
+        {/* Legal Links */}
         <div className="border-t border-gray-700 pt-8 mb-8">
           <div className="flex flex-wrap justify-center gap-4 md:gap-6">
             {legalLinks.map((link, index) => (
@@ -325,7 +302,7 @@ export default function Footer() {
         {/* Bottom Bar */}
         <div className="border-t border-gray-700 pt-8 text-center">
           <p className="text-gray-400 mb-2 text-sm md:text-base">
-            © {new Date().getFullYear()} {content.companyName}. All rights reserved.
+            © {new Date().getFullYear()} {settings.businessName}. All rights reserved.
           </p>
           <p className="text-gray-500 text-sm mb-4">
             Made with <span className="text-pink-500 animate-pulse">❤️</span> by{' '}

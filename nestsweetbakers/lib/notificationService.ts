@@ -1,4 +1,16 @@
-import { collection, addDoc, serverTimestamp, query, where, getDocs, updateDoc, doc } from 'firebase/firestore';
+import { 
+  collection, 
+  addDoc, 
+  serverTimestamp, 
+  query, 
+  where, 
+  getDocs, 
+  updateDoc, 
+  doc,
+  writeBatch,
+  limit,
+  orderBy
+} from 'firebase/firestore';
 import { db } from './firebase';
 
 export interface Notification {
@@ -6,7 +18,7 @@ export interface Notification {
   userId: string;
   title: string;
   message: string;
-  type: 'order' | 'product' | 'system' | 'promo';
+  type: 'order' | 'product' | 'system' | 'promo' | 'info';
   isRead: boolean;
   createdAt: any;
   link?: string;
@@ -40,61 +52,99 @@ class NotificationService {
     }
   }
 
-  // Send notification to all users (broadcast)
+  // Send notification to all users (broadcast) - OPTIMIZED with batching
   async sendBroadcastNotification(
     title: string,
     message: string,
     type: Notification['type'],
     link?: string
-  ): Promise<void> {
+  ): Promise<{ success: boolean; count: number }> {
     try {
-      // Get all users
       const usersSnapshot = await getDocs(collection(db, 'users'));
+      const userIds = usersSnapshot.docs.map(doc => doc.id);
       
-      const notificationPromises = usersSnapshot.docs.map(userDoc =>
-        addDoc(collection(db, 'notifications'), {
-          userId: userDoc.id,
-          title,
-          message,
-          type,
-          isRead: false,
-          createdAt: serverTimestamp(),
-          link,
-        })
-      );
+      // Firebase batch limit is 500 operations
+      const BATCH_SIZE = 500;
+      let totalNotifications = 0;
 
-      await Promise.all(notificationPromises);
+      for (let i = 0; i < userIds.length; i += BATCH_SIZE) {
+        const batch = writeBatch(db);
+        const batchUserIds = userIds.slice(i, i + BATCH_SIZE);
+
+        batchUserIds.forEach(userId => {
+          const notifRef = doc(collection(db, 'notifications'));
+          batch.set(notifRef, {
+            userId,
+            title,
+            message,
+            type,
+            isRead: false,
+            createdAt: serverTimestamp(),
+            link,
+          });
+        });
+
+        await batch.commit();
+        totalNotifications += batchUserIds.length;
+      }
+
+      return { success: true, count: totalNotifications };
     } catch (error) {
       console.error('Error sending broadcast notification:', error);
-      throw error;
+      return { success: false, count: 0 };
     }
   }
 
   // Notify user about new product
   async notifyNewProduct(product: any): Promise<void> {
     try {
-      // Get all users
       const usersSnapshot = await getDocs(collection(db, 'users'));
       
-      const notificationPromises = usersSnapshot.docs.map(userDoc =>
-        this.sendNotification(
-          userDoc.id,
-          '🎂 New Cake Available!',
-          `Check out our new ${product.name} starting at ₹${product.basePrice}!`,
-          'product',
-          `/cakes/${product.id}`,
-          { productId: product.id, productName: product.name }
-        )
-      );
+      // Use batch writes for efficiency
+      const BATCH_SIZE = 500;
+      const userIds = usersSnapshot.docs.map(doc => doc.id);
 
-      await Promise.all(notificationPromises);
+      for (let i = 0; i < userIds.length; i += BATCH_SIZE) {
+        const batch = writeBatch(db);
+        const batchUserIds = userIds.slice(i, i + BATCH_SIZE);
+
+        batchUserIds.forEach(userId => {
+          const notifRef = doc(collection(db, 'notifications'));
+          batch.set(notifRef, {
+            userId,
+            title: '🎂 New Cake Available!',
+            message: `Check out our new ${product.name} starting at ₹${product.basePrice}!`,
+            type: 'product',
+            isRead: false,
+            createdAt: serverTimestamp(),
+            link: `/cakes/${product.id}`,
+            metadata: { productId: product.id, productName: product.name }
+          });
+        });
+
+        await batch.commit();
+      }
     } catch (error) {
       console.error('Error notifying new product:', error);
       // Don't throw error to prevent blocking product creation
     }
   }
 
-  // Notify user about order status change
+  // Notify all users about multiple new products (bulk import)
+  async notifyBulkProducts(count: number): Promise<void> {
+    try {
+      await this.sendBroadcastNotification(
+        '🎉 New Products Added!',
+        `${count} delicious new cake${count > 1 ? 's' : ''} just added to our collection. Explore them now!`,
+        'product',
+        '/products'
+      );
+    } catch (error) {
+      console.error('Error notifying bulk products:', error);
+    }
+  }
+
+  // Notify user about order status change with auto stock update
   async notifyOrderStatusChange(params: {
     orderId: string;
     userId: string;
@@ -106,32 +156,66 @@ class NotificationService {
     try {
       let title = '';
       let message = '';
+      let emoji = '';
 
       switch (params.newStatus) {
+        case 'pending':
+          emoji = '⏳';
+          title = 'Order Received';
+          message = `Your order for ${params.cakeName} has been received and is pending confirmation.`;
+          break;
+        case 'confirmed':
+          emoji = '✅';
+          title = 'Order Confirmed';
+          message = `Great news! Your order for ${params.cakeName} has been confirmed.`;
+          break;
         case 'processing':
-          title = '🔄 Order Being Prepared';
-          message = `Great news! We're now preparing your ${params.cakeName}.`;
+          emoji = '🔄';
+          title = 'Order Being Prepared';
+          message = `We're now preparing your delicious ${params.cakeName}.`;
+          break;
+        case 'ready':
+          emoji = '📦';
+          title = 'Order Ready';
+          message = `Your ${params.cakeName} is ready for pickup/delivery!`;
+          break;
+        case 'out_for_delivery':
+          emoji = '🚚';
+          title = 'Out for Delivery';
+          message = `Your ${params.cakeName} is on its way to you!`;
+          break;
+        case 'delivered':
+          emoji = '🎉';
+          title = 'Order Delivered';
+          message = `Your ${params.cakeName} has been delivered. Enjoy!`;
           break;
         case 'completed':
-          title = '✅ Order Completed';
-          message = `Your order for ${params.cakeName} has been completed!`;
+          emoji = '✅';
+          title = 'Order Completed';
+          message = `Your order for ${params.cakeName} has been completed. Thank you!`;
           break;
         case 'cancelled':
-          title = '❌ Order Cancelled';
+          emoji = '❌';
+          title = 'Order Cancelled';
           message = `Your order for ${params.cakeName} has been cancelled.`;
           break;
         default:
-          title = '📦 Order Status Updated';
+          emoji = '📦';
+          title = 'Order Status Updated';
           message = `Your order for ${params.cakeName} status: ${params.newStatus}`;
       }
 
       await this.sendNotification(
         params.userId,
-        title,
+        `${emoji} ${title}`,
         message,
         'order',
         `/orders/${params.orderId}`,
-        { orderId: params.orderId, oldStatus: params.oldStatus, newStatus: params.newStatus }
+        { 
+          orderId: params.orderId, 
+          oldStatus: params.oldStatus, 
+          newStatus: params.newStatus 
+        }
       );
     } catch (error) {
       console.error('Error notifying order status change:', error);
@@ -161,34 +245,159 @@ class NotificationService {
     }
   }
 
+  // Notify admin about new order
+  async notifyAdminNewOrder(params: {
+    orderId: string;
+    customerName: string;
+    cakeName: string;
+    totalPrice: number;
+  }): Promise<void> {
+    try {
+      // Get all admin users
+      const adminsQuery = query(
+        collection(db, 'users'),
+        where('role', '==', 'admin')
+      );
+      const adminsSnapshot = await getDocs(adminsQuery);
+
+      const batch = writeBatch(db);
+      adminsSnapshot.docs.forEach(adminDoc => {
+        const notifRef = doc(collection(db, 'notifications'));
+        batch.set(notifRef, {
+          userId: adminDoc.id,
+          title: '🛒 New Order Received!',
+          message: `${params.customerName} ordered ${params.cakeName} for ₹${params.totalPrice}`,
+          type: 'order',
+          isRead: false,
+          createdAt: serverTimestamp(),
+          link: `/admin/orders/${params.orderId}`,
+          metadata: { orderId: params.orderId }
+        });
+      });
+
+      await batch.commit();
+    } catch (error) {
+      console.error('Error notifying admin:', error);
+    }
+  }
+
+  // Notify about low stock
+  async notifyAdminLowStock(params: {
+    productId: string;
+    productName: string;
+    currentStock: number;
+  }): Promise<void> {
+    try {
+      const adminsQuery = query(
+        collection(db, 'users'),
+        where('role', '==', 'admin')
+      );
+      const adminsSnapshot = await getDocs(adminsQuery);
+
+      const batch = writeBatch(db);
+      adminsSnapshot.docs.forEach(adminDoc => {
+        const notifRef = doc(collection(db, 'notifications'));
+        batch.set(notifRef, {
+          userId: adminDoc.id,
+          title: '⚠️ Low Stock Alert',
+          message: `${params.productName} is running low! Only ${params.currentStock} left in stock.`,
+          type: 'system',
+          isRead: false,
+          createdAt: serverTimestamp(),
+          link: `/admin/products`,
+          metadata: { productId: params.productId, stock: params.currentStock }
+        });
+      });
+
+      await batch.commit();
+    } catch (error) {
+      console.error('Error notifying low stock:', error);
+    }
+  }
+
+  // Notify about out of stock
+  async notifyAdminOutOfStock(params: {
+    productId: string;
+    productName: string;
+  }): Promise<void> {
+    try {
+      const adminsQuery = query(
+        collection(db, 'users'),
+        where('role', '==', 'admin')
+      );
+      const adminsSnapshot = await getDocs(adminsQuery);
+
+      const batch = writeBatch(db);
+      adminsSnapshot.docs.forEach(adminDoc => {
+        const notifRef = doc(collection(db, 'notifications'));
+        batch.set(notifRef, {
+          userId: adminDoc.id,
+          title: '❌ Out of Stock',
+          message: `${params.productName} is now out of stock! Please restock immediately.`,
+          type: 'system',
+          isRead: false,
+          createdAt: serverTimestamp(),
+          link: `/admin/products`,
+          metadata: { productId: params.productId }
+        });
+      });
+
+      await batch.commit();
+    } catch (error) {
+      console.error('Error notifying out of stock:', error);
+    }
+  }
+
   // Notify about custom request status
   async notifyCustomRequestStatus(params: {
     userId: string;
     requestId: string;
     occasion: string;
     status: string;
+    estimatedPrice?: number;
   }): Promise<void> {
     try {
       let title = '';
       let message = '';
+      let emoji = '';
 
       switch (params.status) {
+        case 'pending':
+          emoji = '⏳';
+          title = 'Custom Request Received';
+          message = `Your custom ${params.occasion} cake request has been received. We'll review it shortly!`;
+          break;
         case 'approved':
-          title = '✅ Custom Request Approved';
-          message = `Your custom ${params.occasion} cake request has been approved!`;
+          emoji = '✅';
+          title = 'Custom Request Approved';
+          message = params.estimatedPrice
+            ? `Your custom ${params.occasion} cake request has been approved! Estimated price: ₹${params.estimatedPrice}`
+            : `Your custom ${params.occasion} cake request has been approved!`;
           break;
         case 'rejected':
-          title = '❌ Custom Request Update';
+          emoji = '❌';
+          title = 'Custom Request Update';
           message = `Unfortunately, we cannot fulfill your ${params.occasion} cake request at this time.`;
           break;
+        case 'in_progress':
+          emoji = '🔄';
+          title = 'Custom Cake in Progress';
+          message = `We're working on your custom ${params.occasion} cake!`;
+          break;
+        case 'completed':
+          emoji = '🎉';
+          title = 'Custom Cake Ready';
+          message = `Your custom ${params.occasion} cake is ready!`;
+          break;
         default:
-          title = '📝 Custom Request Update';
+          emoji = '📝';
+          title = 'Custom Request Update';
           message = `Your ${params.occasion} cake request status: ${params.status}`;
       }
 
       await this.sendNotification(
         params.userId,
-        title,
+        `${emoji} ${title}`,
         message,
         'order',
         `/custom-requests/${params.requestId}`,
@@ -199,23 +408,66 @@ class NotificationService {
     }
   }
 
-  // Get user notifications
-  async getUserNotifications(userId: string, limit = 20): Promise<Notification[]> {
+  // Promotional notification to specific users
+  async sendPromoNotification(params: {
+    userIds: string[];
+    title: string;
+    message: string;
+    link?: string;
+    code?: string;
+  }): Promise<void> {
     try {
-      const q = query(
+      const batch = writeBatch(db);
+      
+      params.userIds.forEach(userId => {
+        const notifRef = doc(collection(db, 'notifications'));
+        batch.set(notifRef, {
+          userId,
+          title: params.title,
+          message: params.message,
+          type: 'promo',
+          isRead: false,
+          createdAt: serverTimestamp(),
+          link: params.link || '/products',
+          metadata: { promoCode: params.code }
+        });
+      });
+
+      await batch.commit();
+    } catch (error) {
+      console.error('Error sending promo notification:', error);
+    }
+  }
+
+  // Get user notifications with pagination
+  async getUserNotifications(
+    userId: string, 
+    limitCount = 20,
+    unreadOnly = false
+  ): Promise<Notification[]> {
+    try {
+      let q = query(
         collection(db, 'notifications'),
-        where('userId', '==', userId)
+        where('userId', '==', userId),
+        orderBy('createdAt', 'desc'),
+        limit(limitCount)
       );
+
+      if (unreadOnly) {
+        q = query(
+          collection(db, 'notifications'),
+          where('userId', '==', userId),
+          where('isRead', '==', false),
+          orderBy('createdAt', 'desc'),
+          limit(limitCount)
+        );
+      }
       
       const snapshot = await getDocs(q);
-      return snapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() } as Notification))
-        .sort((a, b) => {
-          const aTime = a.createdAt?.toDate?.() || new Date(0);
-          const bTime = b.createdAt?.toDate?.() || new Date(0);
-          return bTime.getTime() - aTime.getTime();
-        })
-        .slice(0, limit);
+      return snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data() 
+      } as Notification));
     } catch (error) {
       console.error('Error getting user notifications:', error);
       return [];
@@ -244,11 +496,13 @@ class NotificationService {
       );
       
       const snapshot = await getDocs(q);
-      const updatePromises = snapshot.docs.map(docSnap =>
-        updateDoc(doc(db, 'notifications', docSnap.id), { isRead: true })
-      );
+      const batch = writeBatch(db);
 
-      await Promise.all(updatePromises);
+      snapshot.docs.forEach(docSnap => {
+        batch.update(doc(db, 'notifications', docSnap.id), { isRead: true });
+      });
+
+      await batch.commit();
     } catch (error) {
       console.error('Error marking all notifications as read:', error);
       throw error;
@@ -269,6 +523,40 @@ class NotificationService {
     } catch (error) {
       console.error('Error getting unread count:', error);
       return 0;
+    }
+  }
+
+  // Delete notification
+  async deleteNotification(notificationId: string): Promise<void> {
+    try {
+      await updateDoc(doc(db, 'notifications', notificationId), {
+        isRead: true,
+      });
+    } catch (error) {
+      console.error('Error deleting notification:', error);
+      throw error;
+    }
+  }
+
+  // Delete all notifications for a user
+  async deleteAllUserNotifications(userId: string): Promise<void> {
+    try {
+      const q = query(
+        collection(db, 'notifications'),
+        where('userId', '==', userId)
+      );
+      
+      const snapshot = await getDocs(q);
+      const batch = writeBatch(db);
+
+      snapshot.docs.forEach(docSnap => {
+        batch.delete(doc(db, 'notifications', docSnap.id));
+      });
+
+      await batch.commit();
+    } catch (error) {
+      console.error('Error deleting all notifications:', error);
+      throw error;
     }
   }
 }
