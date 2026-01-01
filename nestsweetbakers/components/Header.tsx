@@ -2,17 +2,20 @@
 
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
-import { 
-  ShoppingCart, Search, User, X, ChevronDown, Heart, Shield, 
-  LayoutDashboard, Bell, Menu, Package, Settings, Users, 
+import {
+  ShoppingCart, Search, User, X, ChevronDown, Heart, Shield,
+  LayoutDashboard, Bell, Menu, Package, Settings, Users,
   BarChart3, MessageSquare, LogOut, Home, Cake,
-  Gift, Info, Phone, Wrench, Sparkles, MapPin, CheckSquare
+  Gift, Info, Phone, Wrench, Sparkles, MapPin, CheckSquare,
+  Megaphone  // ✅ add
 } from 'lucide-react';
 import { useCart } from '@/context/CartContext';
 import { useAuth } from '@/context/AuthContext';
 import { useSettings } from '@/hooks/useSettings';
 import { useRouter, usePathname } from 'next/navigation';
 import { getUnreadNotificationCount } from '@/lib/notificationUtils';
+import { collection, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 export default function Header() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -23,6 +26,9 @@ export default function Header() {
   const [lastScrollY, setLastScrollY] = useState(0);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+ const [announcement, setAnnouncement] = useState<any | null>(null);
+const [hideAnnouncement, setHideAnnouncement] = useState(false);
+
   
   const { cartCount, isHydrated } = useCart();
   const { user, isAdmin, isSuperAdmin, signOut } = useAuth();
@@ -48,6 +54,28 @@ export default function Header() {
     window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
   }, [lastScrollY]);
+// Header announcement (real‑time)
+useEffect(() => {
+  const q = query(
+    collection(db, 'announcements'),
+    where('isActive', '==', true),
+    where('showOnHeader', '==', true),
+    orderBy('createdAt', 'desc'),
+    limit(1)
+  );
+
+  const unsubscribe = onSnapshot(q, (snapshot) => {
+    if (!snapshot.empty) {
+      const docSnap = snapshot.docs[0];
+      setAnnouncement({ id: docSnap.id, ...(docSnap.data() as any) });
+      setHideAnnouncement(false);
+    } else {
+      setAnnouncement(null);
+    }
+  });
+
+  return () => unsubscribe();
+}, []);
 
   // Fetch unread notifications
   useEffect(() => {
@@ -98,6 +126,7 @@ export default function Header() {
     { href: '/admin/custom-requests', label: 'Custom Requests', icon: Gift },
     { href: '/admin/reviews', label: 'Reviews', icon: MessageSquare },
     { href: '/admin/content', label: 'Content Management', icon: Sparkles },
+     { href: '/admin/announcements', label: 'Announcements', icon: Megaphone },
     { href: '/admin/users', label: 'Users', icon: Users, superAdminOnly: true },
     { href: '/admin/analytics', label: 'Analytics', icon: BarChart3 },
     { href: '/admin/settings', label: 'Settings', icon: Settings },
@@ -142,15 +171,50 @@ export default function Header() {
   return (
     <>
       <header
-        className={`fixed top-0 left-0 right-0 z-50 transition-all duration-500 ${
-          headerVisible ? 'translate-y-0' : '-translate-y-full'
-        } ${
-          scrolled 
-            ? 'bg-white/95 backdrop-blur-lg shadow-2xl py-1.5' 
-            : 'bg-white shadow-md py-2'
-        }`}
-      >
-        <div className="max-w-7xl mx-auto px-3 sm:px-4">
+  className={`fixed top-0 left-0 right-0 z-50 transition-all duration-500 ${
+    headerVisible ? 'translate-y-0' : '-translate-y-full'
+  } ${
+    scrolled
+      ? 'bg-white/95 backdrop-blur-lg shadow-2xl py-1.5'
+      : 'bg-white shadow-md py-2'
+  }`}
+>
+  {/* Announcement bar */}
+  {announcement && !hideAnnouncement && (
+    <div className="border-b border-pink-100 bg-gradient-to-r from-pink-600 to-purple-600 text-white">
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 py-1.5 flex items-center gap-2 text-xs sm:text-sm">
+        <Megaphone size={16} className="flex-shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="font-semibold truncate">{announcement.title}</p>
+          {announcement.message && (
+            <p className="hidden sm:block text-[11px] opacity-90 truncate">
+              {announcement.message}
+            </p>
+          )}
+        </div>
+        {announcement.link && (
+          <Link
+            href={announcement.link}
+            className="px-2 py-1 text-xs font-semibold bg-white/15 hover:bg-white/25 rounded-full whitespace-nowrap"
+          >
+            View
+          </Link>
+        )}
+        <button
+          type="button"
+          onClick={() => setHideAnnouncement(true)}
+          className="ml-1 p-1 rounded-full hover:bg-white/20 transition-colors"
+          aria-label="Close announcement"
+        >
+          <X size={14} />
+        </button>
+      </div>
+    </div>
+  )}
+
+  <div className="max-w-7xl mx-auto px-3 sm:px-4">
+  
+
           <div className="flex items-center justify-between">
             {/* Logo */}
             <Link href="/" className="flex items-center space-x-1.5 group relative z-10">
