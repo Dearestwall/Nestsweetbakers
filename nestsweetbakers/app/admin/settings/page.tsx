@@ -9,16 +9,29 @@ import { useRouter } from 'next/navigation';
 import { useToast } from '@/context/ToastContext';
 import Image from 'next/image';
 
-import { 
+import {
   Save, MapPin, Phone, DollarSign, ShoppingCart, Settings as SettingsIcon,
   AlertCircle, CheckCircle, Info, Mail, MessageCircle, Clock, Globe,
   Facebook, Instagram, Twitter, Youtube, Building, Package, Upload,
   Image as ImageIcon, Palette, Bell, CreditCard, Eye, Zap, Shield,
   Loader2, Search, Linkedin, Monitor, Smartphone, X, Check,
   TrendingUp, Users, Award, Store, Tag, Percent, Truck, Home,
-  Star, Heart  // ADD THESE TWO
+  Star, Heart
 } from 'lucide-react';
 
+// ---------- NEW: Promo code type ----------
+interface PromoCode {
+  id: string;                    // internal id
+  code: string;                  // e.g. NEST10
+  type: 'percentage' | 'fixed';  // % or flat
+  value: number;                 // 10 = 10% or ₹10
+  minOrder: number;              // minimum cart total
+  maxDiscount?: number;          // max discount for % type
+  appliesTo: 'cart' | 'products';
+  productIds?: string;           // comma-separated product IDs
+  isActive: boolean;
+  usageLimit?: number;           // optional total usage limit
+}
 
 interface SiteSettings {
   // Business Info
@@ -28,14 +41,14 @@ interface SiteSettings {
   favicon: string;
   cityName: string;
   address: string;
-  
+
   // Contact Info
   phone: string;
   whatsapp: string;
   email: string;
   supportEmail: string;
   supportPhone: string;
-  
+
   // Delivery & Pricing
   allowedPincodes: string;
   deliveryFee: number;
@@ -43,11 +56,11 @@ interface SiteSettings {
   minimumOrder: number;
   taxRate: number;
   currency: 'INR' | 'CAD';
-  
+
   // Business Hours & Info
   businessHours: string;
   deliveryInfo: string;
-  
+
   // Social Media
   socialMedia: {
     facebook?: string;
@@ -57,7 +70,7 @@ interface SiteSettings {
     linkedin?: string;
     pinterest?: string;
   };
-  
+
   // SEO Settings
   seo: {
     title: string;
@@ -65,7 +78,7 @@ interface SiteSettings {
     keywords: string;
     ogImage: string;
   };
-  
+
   // Features Toggle
   features: {
     enableWhatsAppOrders: boolean;
@@ -76,14 +89,14 @@ interface SiteSettings {
     enableWishlist: boolean;
     enableNewsletter: boolean;
   };
-  
+
   // Colors & Branding
   branding: {
     primaryColor: string;
     secondaryColor: string;
     accentColor: string;
   };
-  
+
   // Payment Methods
   paymentMethods: {
     razorpay: boolean;
@@ -91,13 +104,16 @@ interface SiteSettings {
     paypal: boolean;
     cod: boolean;
   };
-  
+
   // Notifications
   notifications: {
     orderEmail: string;
     enableSMS: boolean;
     enableEmailNotifications: boolean;
   };
+
+  // ---------- NEW: promo codes ----------
+  promoCodes?: PromoCode[];
 }
 
 export default function AdminSettings() {
@@ -156,7 +172,8 @@ export default function AdminSettings() {
       orderEmail: 'orders@nestsweetbakers.com',
       enableSMS: false,
       enableEmailNotifications: true
-    }
+    },
+    promoCodes: []   // NEW default
   });
 
   const [loading, setLoading] = useState(true);
@@ -179,7 +196,7 @@ export default function AdminSettings() {
       setLoading(true);
       const docRef = doc(db, 'settings', 'site');
       const docSnap = await getDoc(docRef);
-      
+
       if (docSnap.exists()) {
         const data = docSnap.data() as SiteSettings;
         setSettings(prev => ({
@@ -190,7 +207,8 @@ export default function AdminSettings() {
           features: { ...prev.features, ...data.features },
           branding: { ...prev.branding, ...data.branding },
           paymentMethods: { ...prev.paymentMethods, ...data.paymentMethods },
-          notifications: { ...prev.notifications, ...data.notifications }
+          notifications: { ...prev.notifications, ...data.notifications },
+          promoCodes: data.promoCodes || prev.promoCodes || []
         }));
       }
     } catch (error) {
@@ -206,59 +224,98 @@ export default function AdminSettings() {
   }, [fetchSettings]);
 
   // Handle image upload to Cloudinary
-const handleImageUpload = async (file: File, field: 'logo' | 'favicon' | 'ogImage') => {
-  if (!file) return;
-  
-  // Validate file type
-  if (!file.type.startsWith('image/')) {
-    showError('Please upload an image file');
-    return;
-  }
+  const handleImageUpload = async (
+    file: File,
+    field: 'logo' | 'favicon' | 'ogImage'
+  ) => {
+    if (!file) return;
 
-  // Validate file size (max 2MB)
-  if (file.size > 2 * 1024 * 1024) {
-    showError('Image size should be less than 2MB');
-    return;
-  }
-  
-  setUploading(true);
-  try {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('upload_preset', process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || 'your_upload_preset');
-    formData.append('folder', 'settings');
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      showError('Please upload an image file');
+      return;
+    }
 
-    const response = await fetch(
-      `https://api.cloudinary.com/v1_1/${process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME}/image/upload`,
-      {
-        method: 'POST',
-        body: formData,
+    // Validate file size (max 2MB)
+    if (file.size > 2 * 1024 * 1024) {
+      showError('Image size should be less than 2MB');
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append(
+        'upload_preset',
+        process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || 'your_upload_preset'
+      );
+      formData.append('folder', 'settings');
+
+      const response = await fetch(
+        `https://api.cloudinary.com/v1_1/${process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME}/image/upload`,
+        {
+          method: 'POST',
+          body: formData
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error('Upload failed');
       }
-    );
 
-    if (!response.ok) {
-      throw new Error('Upload failed');
+      const data = await response.json();
+      const url = data.secure_url;
+
+      if (field === 'ogImage') {
+        setSettings(prev => ({
+          ...prev,
+          seo: { ...prev.seo, ogImage: url }
+        }));
+      } else {
+        setSettings(prev => ({ ...prev, [field]: url }));
+      }
+
+      setHasChanges(true);
+      showSuccess(`${field} uploaded successfully!`);
+    } catch (error) {
+      console.error('Upload error:', error);
+      showError('Failed to upload image');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // ---------- NEW: handle image URL directly ----------
+  const handleImageUrlChange = (
+    field: 'logo' | 'favicon' | 'ogImage',
+    url: string
+  ) => {
+    const trimmed = url.trim();
+
+    if (trimmed && !/^https?:\/\//i.test(trimmed)) {
+      showError('Please enter a valid image URL starting with http or https');
+      return;
     }
 
-    const data = await response.json();
-    const url = data.secure_url;
-    
-    if (field === 'ogImage') {
-      setSettings(prev => ({ ...prev, seo: { ...prev.seo, ogImage: url } }));
-    } else {
-      setSettings(prev => ({ ...prev, [field]: url }));
-    }
-    
+    setSettings(prev => {
+      if (field === 'ogImage') {
+        return {
+          ...prev,
+          seo: { ...prev.seo, ogImage: trimmed }
+        };
+      }
+      return {
+        ...prev,
+        [field]: trimmed
+      };
+    });
+
     setHasChanges(true);
-    showSuccess(`${field} uploaded successfully!`);
-  } catch (error) {
-    console.error('Upload error:', error);
-    showError('Failed to upload image');
-  } finally {
-    setUploading(false);
-  }
-};
-
+    if (trimmed) {
+      showSuccess(`${field} URL updated successfully!`);
+    }
+  };
 
   // Handle change
   const handleChange = (field: keyof SiteSettings, value: any) => {
@@ -267,11 +324,70 @@ const handleImageUpload = async (file: File, field: 'logo' | 'favicon' | 'ogImag
   };
 
   // Handle nested change
-  const handleNestedChange = (parent: keyof SiteSettings, field: string, value: any) => {
+  const handleNestedChange = (
+    parent: keyof SiteSettings,
+    field: string,
+    value: any
+  ) => {
     setSettings(prev => ({
       ...prev,
       [parent]: { ...(prev[parent] as any), [field]: value }
     }));
+    setHasChanges(true);
+  };
+
+  // ---------- NEW: promo code handlers ----------
+  const handlePromoChange = (
+    index: number,
+    field: keyof PromoCode,
+    value: any
+  ) => {
+    setSettings(prev => {
+      const promoCodes = [...(prev.promoCodes || [])];
+      promoCodes[index] = {
+        ...promoCodes[index],
+        [field]:
+          field === 'code'
+            ? String(value).toUpperCase()
+            : field === 'value' ||
+              field === 'minOrder' ||
+              field === 'maxDiscount' ||
+              field === 'usageLimit'
+            ? (value === '' ? undefined : Number(value))
+            : value
+      } as PromoCode;
+      return { ...prev, promoCodes };
+    });
+    setHasChanges(true);
+  };
+
+  const addPromoCode = () => {
+    const newPromo: PromoCode = {
+      id: Date.now().toString(),
+      code: 'NEWPROMO',
+      type: 'percentage',
+      value: 10,
+      minOrder: 0,
+      maxDiscount: undefined,
+      appliesTo: 'cart',
+      productIds: '',
+      isActive: true,
+      usageLimit: undefined
+    };
+    setSettings(prev => ({
+      ...prev,
+      promoCodes: [...(prev.promoCodes || []), newPromo]
+    }));
+    setHasChanges(true);
+    showSuccess('New promo code added');
+  };
+
+  const removePromoCode = (index: number) => {
+    setSettings(prev => {
+      const promoCodes = [...(prev.promoCodes || [])];
+      promoCodes.splice(index, 1);
+      return { ...prev, promoCodes };
+    });
     setHasChanges(true);
   };
 
@@ -284,7 +400,9 @@ const handleImageUpload = async (file: File, field: 'logo' | 'favicon' | 'ogImag
 
     // Validation
     if (!settings.businessName || !settings.phone || !settings.email) {
-      showError('❌ Please fill in all required fields (Business Name, Phone, Email)');
+      showError(
+        '❌ Please fill in all required fields (Business Name, Phone, Email)'
+      );
       return;
     }
 
@@ -319,7 +437,9 @@ const handleImageUpload = async (file: File, field: 'logo' | 'favicon' | 'ogImag
       <div className="flex items-center justify-center min-h-screen bg-gray-50">
         <div className="text-center">
           <Loader2 className="animate-spin h-16 w-16 text-pink-600 mx-auto mb-4" />
-          <p className="text-gray-600 font-semibold text-lg">Loading settings...</p>
+          <p className="text-gray-600 font-semibold text-lg">
+            Loading settings...
+          </p>
         </div>
       </div>
     );
@@ -333,8 +453,10 @@ const handleImageUpload = async (file: File, field: 'logo' | 'favicon' | 'ogImag
     { id: 'social', label: 'Social Media', icon: Globe, color: 'from-blue-500 to-blue-600' },
     { id: 'seo', label: 'SEO', icon: Search, color: 'from-indigo-500 to-indigo-600' },
     { id: 'features', label: 'Features', icon: Zap, color: 'from-yellow-500 to-yellow-600' },
+    // NEW: Promo codes tab
+    { id: 'promos', label: 'Promo Codes', icon: Tag, color: 'from-emerald-500 to-emerald-600' },
     { id: 'payments', label: 'Payments', icon: CreditCard, color: 'from-teal-500 to-teal-600' },
-    { id: 'notifications', label: 'Notifications', icon: Bell, color: 'from-red-500 to-red-600' },
+    { id: 'notifications', label: 'Notifications', icon: Bell, color: 'from-red-500 to-red-600' }
   ];
 
   const currencySymbol = settings.currency === 'CAD' ? '$' : '₹';
@@ -353,7 +475,8 @@ const handleImageUpload = async (file: File, field: 'logo' | 'favicon' | 'ogImag
                 Save Settings?
               </h3>
               <p className="text-gray-600 text-center mb-6">
-                Are you sure you want to save these changes? This will update your business settings across the entire website.
+                Are you sure you want to save these changes? This will update
+                your business settings across the entire website.
               </p>
               <div className="flex gap-3">
                 <button
@@ -394,7 +517,8 @@ const handleImageUpload = async (file: File, field: 'logo' | 'favicon' | 'ogImag
             </h1>
             <p className="text-gray-600 flex items-center gap-2">
               <SettingsIcon size={16} />
-              Configure your business information, contact details, and preferences
+              Configure your business information, contact details, and
+              preferences
             </p>
           </div>
           {hasChanges && (
@@ -412,9 +536,14 @@ const handleImageUpload = async (file: File, field: 'logo' | 'favicon' | 'ogImag
               <Info className="text-blue-600" size={24} />
             </div>
             <div>
-              <h3 className="font-bold text-gray-800 mb-1">Important Information</h3>
+              <h3 className="font-bold text-gray-800 mb-1">
+                Important Information
+              </h3>
               <p className="text-sm text-gray-600">
-                These settings control core aspects of your website and business. Changes will be reflected across all pages including contact information, pricing, and delivery details. Make sure to save after making changes.
+                These settings control core aspects of your website and
+                business. Changes will be reflected across all pages including
+                contact information, pricing, delivery details, promo codes, and
+                branding. Make sure to save after making changes.
               </p>
             </div>
           </div>
@@ -908,7 +1037,7 @@ const handleImageUpload = async (file: File, field: 'logo' | 'favicon' | 'ogImag
             </div>
           )}
 
-          {/* ========== BRANDING TAB ========== */}
+         {/* BRANDING TAB – UPDATED with URL + upload */}
           {activeTab === 'branding' && (
             <div className="space-y-6">
               <div className="bg-white rounded-2xl shadow-lg p-6">
@@ -917,100 +1046,213 @@ const handleImageUpload = async (file: File, field: 'logo' | 'favicon' | 'ogImag
                     <ImageIcon className="text-white" size={24} />
                   </div>
                   <div>
-                    <h2 className="text-xl font-bold text-gray-800">Logo & Images</h2>
-                    <p className="text-sm text-gray-600">Upload your brand assets</p>
+                    <h2 className="text-xl font-bold text-gray-800">
+                      Logo & Images
+                    </h2>
+                    <p className="text-sm text-gray-600">
+                      Upload your brand assets or use image URLs
+                    </p>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  {/* Logo Upload */}
+                 {/* Logo Upload + URL */}
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">Logo</label>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Logo
+                    </label>
                     <div className="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center hover:border-pink-400 transition">
                       {settings.logo && settings.logo !== '/logo.png' ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={settings.logo} alt="Logo" className="h-20 mx-auto mb-3 object-contain" />
+                        <img
+                          src={settings.logo}
+                          alt="Logo"
+                          className="h-20 mx-auto mb-3 object-contain"
+                        />
                       ) : (
                         <div className="h-20 flex items-center justify-center mb-3">
                           <ImageIcon className="text-gray-300" size={40} />
                         </div>
                       )}
+
                       <input
                         type="file"
                         accept="image/*"
-                        onChange={(e) => e.target.files?.[0] && handleImageUpload(e.target.files[0], 'logo')}
+                        onChange={e =>
+                          e.target.files?.[0] &&
+                          handleImageUpload(e.target.files[0], 'logo')
+                        }
                         className="hidden"
                         id="logo-upload"
                         disabled={uploading}
                       />
                       <label
                         htmlFor="logo-upload"
-                        className={`cursor-pointer text-pink-600 hover:text-pink-700 flex items-center justify-center gap-2 font-semibold ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        className={`cursor-pointer text-pink-600 hover:text-pink-700 flex items-center justify-center gap-2 font-semibold ${
+                          uploading ? 'opacity-50 cursor-not-allowed' : ''
+                        }`}
                       >
                         <Upload size={18} />
                         {uploading ? 'Uploading...' : 'Upload Logo'}
                       </label>
-                      <p className="text-xs text-gray-500 mt-2">PNG, JPG (max 2MB)</p>
+
+                      {/* URL input */}
+                      <div className="mt-3 text-left space-y-1">
+                        <p className="text-xs font-semibold text-gray-600">
+                          Or paste logo URL
+                        </p>
+                        <input
+                          type="url"
+                          value={settings.logo || ''}
+                          onChange={e =>
+                            handleImageUrlChange('logo', e.target.value)
+                          }
+                          placeholder="https://example.com/logo.png"
+                          className="w-full px-3 py-2 border rounded-lg text-xs focus:ring-2 focus:ring-pink-500 focus:border-transparent"
+                        />
+                        <p className="text-[11px] text-gray-400">
+                          Use any public image URL (for example from
+                          Cloudinary).
+                        </p>
+                      </div>
+
+                      <p className="text-xs text-gray-500 mt-2">
+                        PNG, JPG (max 2MB)
+                      </p>
                     </div>
                   </div>
 
-                  {/* Favicon Upload */}
+                  {/* Favicon Upload + URL */}
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">Favicon</label>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Favicon
+                    </label>
                     <div className="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center hover:border-pink-400 transition">
                       {settings.favicon && settings.favicon !== '/favicon.ico' ? (
-                      <Image src={settings.favicon} alt="Favicon" width={48} height={48} className="mx-auto mb-3" />
+                        <Image
+                          src={settings.favicon}
+                          alt="Favicon"
+                          width={48}
+                          height={48}
+                          className="mx-auto mb-3 object-contain"
+                        />
                       ) : (
                         <div className="h-12 flex items-center justify-center mb-3">
                           <ImageIcon className="text-gray-300" size={24} />
                         </div>
                       )}
+
                       <input
                         type="file"
                         accept="image/*"
-                        onChange={(e) => e.target.files?.[0] && handleImageUpload(e.target.files[0], 'favicon')}
+                        onChange={e =>
+                          e.target.files?.[0] &&
+                          handleImageUpload(e.target.files[0], 'favicon')
+                        }
                         className="hidden"
                         id="favicon-upload"
                         disabled={uploading}
                       />
                       <label
                         htmlFor="favicon-upload"
-                        className={`cursor-pointer text-pink-600 hover:text-pink-700 flex items-center justify-center gap-2 font-semibold ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        className={`cursor-pointer text-pink-600 hover:text-pink-700 flex items-center justify-center gap-2 font-semibold ${
+                          uploading ? 'opacity-50 cursor-not-allowed' : ''
+                        }`}
                       >
                         <Upload size={18} />
                         {uploading ? 'Uploading...' : 'Upload Favicon'}
                       </label>
-                      <p className="text-xs text-gray-500 mt-2">16x16 or 32x32 px</p>
+
+                      {/* URL input */}
+                      <div className="mt-3 text-left space-y-1">
+                        <p className="text-xs font-semibold text-gray-600">
+                          Or paste favicon URL
+                        </p>
+                        <input
+                          type="url"
+                          value={settings.favicon || ''}
+                          onChange={e =>
+                            handleImageUrlChange('favicon', e.target.value)
+                          }
+                          placeholder="https://example.com/favicon.ico"
+                          className="w-full px-3 py-2 border rounded-lg text-xs focus:ring-2 focus:ring-pink-500 focus:border-transparent"
+                        />
+                        <p className="text-[11px] text-gray-400">
+                          Recommended 16x16 or 32x32 px.
+                        </p>
+                      </div>
+
+                      <p className="text-xs text-gray-500 mt-2">
+                        ICO / PNG, max 2MB
+                      </p>
                     </div>
                   </div>
 
-                  {/* OG Image Upload */}
+                 
+                    {/* OG Image Upload + URL */}
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">OG Image (SEO)</label>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      OG Image (SEO)
+                    </label>
                     <div className="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center hover:border-pink-400 transition">
                       {settings.seo.ogImage ? (
-                      <Image src={settings.seo.ogImage} alt="OG Image" width={80} height={80} className="mx-auto mb-3 object-cover rounded" />
+                        <Image
+                          src={settings.seo.ogImage}
+                          alt="OG Image"
+                          width={120}
+                          height={63}
+                          className="mx-auto mb-3 object-cover rounded"
+                        />
                       ) : (
                         <div className="h-20 flex items-center justify-center mb-3">
                           <ImageIcon className="text-gray-300" size={40} />
                         </div>
                       )}
+
                       <input
                         type="file"
                         accept="image/*"
-                        onChange={(e) => e.target.files?.[0] && handleImageUpload(e.target.files[0], 'ogImage')}
+                        onChange={e =>
+                          e.target.files?.[0] &&
+                          handleImageUpload(e.target.files[0], 'ogImage')
+                        }
                         className="hidden"
                         id="og-image-upload"
                         disabled={uploading}
                       />
                       <label
                         htmlFor="og-image-upload"
-                        className={`cursor-pointer text-pink-600 hover:text-pink-700 flex items-center justify-center gap-2 font-semibold ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        className={`cursor-pointer text-pink-600 hover:text-pink-700 flex items-center justify-center gap-2 font-semibold ${
+                          uploading ? 'opacity-50 cursor-not-allowed' : ''
+                        }`}
                       >
                         <Upload size={18} />
                         {uploading ? 'Uploading...' : 'Upload Image'}
                       </label>
-                      <p className="text-xs text-gray-500 mt-2">1200x630 px recommended</p>
+
+                      {/* URL input */}
+                      <div className="mt-3 text-left space-y-1">
+                        <p className="text-xs font-semibold text-gray-600">
+                          Or paste OG image URL
+                        </p>
+                        <input
+                          type="url"
+                          value={settings.seo.ogImage || ''}
+                          onChange={e =>
+                            handleImageUrlChange('ogImage', e.target.value)
+                          }
+                          placeholder="https://example.com/og-image.jpg"
+                          className="w-full px-3 py-2 border rounded-lg text-xs focus:ring-2 focus:ring-pink-500 focus:border-transparent"
+                        />
+                        <p className="text-[11px] text-gray-400">
+                          Recommended 1200x630 px, public URL (used in social
+                          previews).
+                        </p>
+                      </div>
+
+                      <p className="text-xs text-gray-500 mt-2">
+                        JPEG/PNG, max 2MB
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -1425,6 +1667,270 @@ const handleImageUpload = async (file: File, field: 'logo' | 'favicon' | 'ogImag
                     </label>
                   );
                 })}
+              </div>
+            </div>
+          )}
+           {/* ---------- NEW: PROMO CODES TAB ---------- */}
+          {activeTab === 'promos' && (
+            <div className="max-w-5xl mx-auto bg-white rounded-2xl shadow-lg p-6 space-y-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-12 h-12 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-xl flex items-center justify-center">
+                  <Tag className="text-white" size={24} />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-gray-800">
+                    Promo Codes
+                  </h2>
+                  <p className="text-sm text-gray-600">
+                    Create discount codes that will be applied on cart total or
+                    specific products. Your cart and product pages can read
+                    these codes from the <code>settings.site</code> document and
+                    apply discounts accordingly.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex justify-between items-center mb-4">
+                <p className="text-sm text-gray-600">
+                  Total promo codes: {settings.promoCodes?.length || 0}
+                </p>
+                <button
+                  type="button"
+                  onClick={addPromoCode}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 flex items-center gap-2"
+                >
+                  <Tag size={16} />
+                  Add Promo Code
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                {(settings.promoCodes || []).length === 0 && (
+                  <p className="text-sm text-gray-500 italic">
+                    No promo codes added yet. Click &quot;Add Promo Code&quot; to
+                    create one.
+                  </p>
+                )}
+
+                {(settings.promoCodes || []).map((promo, index) => (
+                  <div
+                    key={promo.id}
+                    className="border-2 border-gray-200 rounded-2xl p-4 space-y-4"
+                  >
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center gap-2">
+                        <span className="px-2 py-1 text-xs font-semibold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          {promo.code || 'NEWPROMO'}
+                        </span>
+                        <span className="text-xs text-gray-500">
+                          {promo.isActive ? 'Active' : 'Inactive'}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removePromoCode(index)}
+                        className="text-xs text-red-500 hover:text-red-600 flex items-center gap-1"
+                      >
+                        <X size={14} />
+                        Remove
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-700 mb-1">
+                          Code
+                        </label>
+                        <input
+                          type="text"
+                          value={promo.code}
+                          onChange={e =>
+                            handlePromoChange(
+                              index,
+                              'code',
+                              e.target.value.toUpperCase()
+                            )
+                          }
+                          placeholder="NEST10"
+                          className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-sm"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-700 mb-1">
+                          Type
+                        </label>
+                        <select
+                          value={promo.type}
+                          onChange={e =>
+                            handlePromoChange(
+                              index,
+                              'type',
+                              e.target.value as 'percentage' | 'fixed'
+                            )
+                          }
+                          className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-sm"
+                        >
+                          <option value="percentage">Percentage (%)</option>
+                          <option value="fixed">
+                            Fixed ({currencySymbol})
+                          </option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-700 mb-1">
+                          Value
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          value={promo.value ?? ''}
+                          onChange={e =>
+                            handlePromoChange(index, 'value', e.target.value)
+                          }
+                          placeholder={promo.type === 'percentage' ? '10' : '100'}
+                          className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-sm"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-700 mb-1">
+                          Min Order Amount ({currencySymbol})
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          value={promo.minOrder ?? ''}
+                          onChange={e =>
+                            handlePromoChange(
+                              index,
+                              'minOrder',
+                              e.target.value
+                            )
+                          }
+                          placeholder="0"
+                          className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-sm"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-700 mb-1">
+                          Max Discount ({currencySymbol}, only for %)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          value={promo.maxDiscount ?? ''}
+                          onChange={e =>
+                            handlePromoChange(
+                              index,
+                              'maxDiscount',
+                              e.target.value
+                            )
+                          }
+                          placeholder="Optional"
+                          className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-sm"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-700 mb-1">
+                          Usage Limit (optional)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          value={promo.usageLimit ?? ''}
+                          onChange={e =>
+                            handlePromoChange(
+                              index,
+                              'usageLimit',
+                              e.target.value
+                            )
+                          }
+                          placeholder="Unlimited if empty"
+                          className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-sm"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-700 mb-1">
+                          Applies To
+                        </label>
+                        <select
+                          value={promo.appliesTo}
+                          onChange={e =>
+                            handlePromoChange(
+                              index,
+                              'appliesTo',
+                              e.target.value as 'cart' | 'products'
+                            )
+                          }
+                          className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-sm"
+                        >
+                          <option value="cart">Cart Total</option>
+                          <option value="products">Specific Products</option>
+                        </select>
+                        <p className="text-[11px] text-gray-500 mt-1">
+                          Choose whether this promo affects the full cart or
+                          selected products.
+                        </p>
+                      </div>
+
+                      <div className="md:col-span-2">
+                        <label className="block text-xs font-semibold text-gray-700 mb-1">
+                          Product IDs (comma-separated, only for products)
+                        </label>
+                        <input
+                          type="text"
+                          value={promo.productIds || ''}
+                          onChange={e =>
+                            handlePromoChange(
+                              index,
+                              'productIds',
+                              e.target.value
+                            )
+                          }
+                          placeholder="prod_1, prod_2"
+                          className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg text-sm"
+                        />
+                        <p className="text-[11px] text-gray-500 mt-1">
+                          Your product pages can check if their ID is included
+                          here and show a discount badge.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2 border-t border-gray-100">
+                      <label className="flex items-center gap-2 text-sm text-gray-700">
+                        <input
+                          type="checkbox"
+                          checked={promo.isActive}
+                          onChange={e =>
+                            handlePromoChange(
+                              index,
+                              'isActive',
+                              e.target.checked
+                            )
+                          }
+                          className="w-4 h-4 text-emerald-600 rounded focus:ring-emerald-500"
+                        />
+                        Active
+                      </label>
+
+                      <div className="text-xs text-gray-500">
+                        Example: Your cart logic can read this promo, verify
+                        code, minOrder, and apply discount on subtotal before
+                        delivery and tax.
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}
