@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { collection, getDocs, updateDoc, deleteDoc, doc, orderBy, query, serverTimestamp, writeBatch } from 'firebase/firestore';
+import { collection, getDocs, updateDoc, deleteDoc, doc, orderBy, query, serverTimestamp, writeBatch, where, addDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/context/ToastContext';
 import { notificationService } from '@/lib/notificationService';
@@ -9,9 +9,11 @@ import {
   Package, Search, Download, Phone, Mail, MapPin, Calendar, Loader2, Eye,
   ChevronDown, ChevronUp, Trash2, CheckSquare, Square, Grid3x3, List, Printer,
   RefreshCw, Clock, CheckCircle, XCircle, AlertCircle, Gift, FileText, CreditCard,
-  Truck, User, ShoppingCart, DollarSign, MessageCircle, TrendingUp, Percent, Info
+  Truck, User, ShoppingCart, DollarSign, MessageCircle, TrendingUp, Percent, Info, 
+  Send, Edit2, ExternalLink, Bell, Zap, Filter
 } from 'lucide-react';
 import Image from 'next/image';
+import Link from 'next/link';
 
 interface OrderItem {
   cakeId: string;
@@ -101,6 +103,15 @@ export default function AdminOrdersPage() {
   const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set());
   const [bulkActionMode, setBulkActionMode] = useState(false);
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
+  
+  // WhatsApp message modal state
+  const [whatsappModal, setWhatsappModal] = useState<{
+    show: boolean;
+    order: Order | null;
+    newStatus: string;
+    message: string;
+  }>({ show: false, order: null, newStatus: '', message: '' });
+  
   const [confirmModal, setConfirmModal] = useState<{
     show: boolean;
     id: string | string[];
@@ -194,43 +205,174 @@ export default function AdminOrdersPage() {
     setFilteredOrders(result);
   }, [orders, statusFilter, dateFilter, searchTerm, sortBy, sortOrder]);
 
-  const updateOrderStatus = async (orderId: string, newStatus: string, skipConfirm = false) => {
+  // Generate WhatsApp status message
+  const generateStatusMessage = (order: Order, newStatus: string) => {
+    let statusEmoji = '';
+    let statusText = '';
+    
+    switch (newStatus) {
+      case 'pending':
+        statusEmoji = '⏳';
+        statusText = 'Your order is pending confirmation.';
+        break;
+      case 'processing':
+        statusEmoji = '👨‍🍳';
+        statusText = 'Your order is being prepared!';
+        break;
+      case 'completed':
+        statusEmoji = '✅';
+        statusText = 'Your order is ready for delivery/pickup!';
+        break;
+      case 'cancelled':
+        statusEmoji = '❌';
+        statusText = 'Your order has been cancelled.';
+        break;
+      default:
+        statusEmoji = '📦';
+        statusText = `Order status updated to ${newStatus}`;
+    }
+
+    const message = 
+      `Hello ${order.userName},\n\n` +
+      `${statusEmoji} ${statusText}\n\n` +
+      `ORDER DETAILS:\n` +
+      `━━━━━━━━━━━━━━━━\n` +
+      `Order ID: #${order.orderRef}\n` +
+      `Items: ${order.items.map(i => `${i.cakeName} (${i.weight})`).join(', ')}\n` +
+      `Total Amount: Rs ${order.total}\n` +
+      `Delivery Date: ${new Date(order.deliveryDate).toLocaleDateString('en-IN')}\n` +
+      `Delivery Time: ${order.deliveryTime === 'morning' ? '9 AM - 12 PM' : order.deliveryTime === 'afternoon' ? '12 PM - 4 PM' : '4 PM - 8 PM'}\n\n` +
+      `Thank you for choosing NestSweet Bakers!\n\n` +
+      `For any queries, feel free to contact us.`;
+    
+    return message;
+  };
+
+  // ✅ Create in-app notification
+  const createNotification = async (order: Order, newStatus: string, oldStatus: string) => {
+    if (!order.userId || oldStatus === newStatus) return;
+
+    try {
+      let title = '';
+      let body = '';
+      let type: 'info' | 'success' | 'warning' = 'info';
+
+      switch (newStatus) {
+        case 'processing':
+          title = 'Order Being Prepared';
+          body = `Your order #${order.orderRef} is now being prepared. We'll update you when it's ready!`;
+          type = 'info';
+          break;
+        case 'completed':
+          title = 'Order Ready!';
+          body = `Your order #${order.orderRef} is ready for delivery. Get ready for delicious cakes!`;
+          type = 'success';
+          break;
+        case 'cancelled':
+          title = 'Order Cancelled';
+          body = `Your order #${order.orderRef} has been cancelled. Contact us if you have questions.`;
+          type = 'warning';
+          break;
+        default:
+          title = 'Order Update';
+          body = `Your order #${order.orderRef} status has been updated to ${newStatus}.`;
+          type = 'info';
+      }
+
+      await addDoc(collection(db, 'notifications'), {
+        userId: order.userId,
+        orderId: order.id,
+        orderRef: order.orderRef,
+        title,
+        body,
+        type,
+        read: false,
+        createdAt: serverTimestamp(),
+        actionUrl: `/orders`,
+      });
+
+      console.log('✅ Notification created for user:', order.userId);
+    } catch (error) {
+      console.error('Error creating notification:', error);
+    }
+  };
+
+  // Updated: Show WhatsApp modal before status update
+  const updateOrderStatus = async (orderId: string, newStatus: string, skipConfirm = false, customMessage?: string) => {
     if (!skipConfirm && (newStatus === 'cancelled' || newStatus === 'completed')) {
       setConfirmModal({ show: true, id: orderId, type: 'status', status: newStatus, isBulk: false });
       return;
     }
 
+    const order = orders.find(o => o.id === orderId);
+    
+    // Show WhatsApp modal if phone exists and no custom message provided
+    if (!customMessage && order && order.userPhone && newStatus !== order.status) {
+      const defaultMessage = generateStatusMessage(order, newStatus);
+      setWhatsappModal({
+        show: true,
+        order,
+        newStatus,
+        message: defaultMessage
+      });
+      return;
+    }
+
     setUpdating(orderId);
     try {
-      const updatedOrder = orders.find(o => o.id === orderId);
-      const oldStatus = updatedOrder?.status;
+      const oldStatus = order?.status;
 
       await updateDoc(doc(db, 'orders', orderId), {
         status: newStatus,
         updatedAt: serverTimestamp(),
       });
 
-      setOrders(orders.map(order =>
-        order.id === orderId ? { ...order, status: newStatus as any } : order
+      setOrders(orders.map(o =>
+        o.id === orderId ? { ...o, status: newStatus as any } : o
       ));
 
-      if (updatedOrder && oldStatus !== newStatus && updatedOrder.userId) {
+      // ✅ Create in-app notification
+      if (order && oldStatus) {
+        await createNotification(order, newStatus, oldStatus);
+      }
+
+      // Send Firebase notification
+      if (order && oldStatus !== newStatus && order.userId) {
         notificationService.notifyOrderStatusChange({
           orderId,
-          userId: updatedOrder.userId,
-          customerName: updatedOrder.userName,
-          cakeName: updatedOrder.items[0]?.cakeName || 'Order',
+          userId: order.userId,
+          customerName: order.userName,
+          cakeName: order.items[0]?.cakeName || 'Order',
           oldStatus: oldStatus!,
           newStatus,
         }).catch(err => console.error('Failed to send notification', err));
       }
 
       showSuccess(`✅ Order status updated to ${newStatus}`);
+      
+      // Open WhatsApp if custom message provided
+      if (customMessage && order && order.userPhone) {
+        const whatsappUrl = `https://wa.me/${order.userPhone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(customMessage)}`;
+        window.open(whatsappUrl, '_blank');
+      }
     } catch (error) {
       console.error('Error updating order:', error);
       showError('Failed to update order status');
     } finally {
       setUpdating(null);
+    }
+  };
+
+  // Handle sending WhatsApp message
+  const handleSendWhatsApp = () => {
+    if (whatsappModal.order) {
+      updateOrderStatus(
+        whatsappModal.order.id,
+        whatsappModal.newStatus,
+        true,
+        whatsappModal.message
+      );
+      setWhatsappModal({ show: false, order: null, newStatus: '', message: '' });
     }
   };
 
@@ -425,20 +567,19 @@ export default function AdminOrdersPage() {
     return <StatusIcon size={16} />;
   };
 
-  // ✅ Generate WhatsApp message with order details
+  // Simple WhatsApp message without status update
   const generateWhatsAppMessage = (order: Order) => {
-    const message = encodeURIComponent(
+    const message = 
       `Hello ${order.userName},\n\n` +
       `Your order #${order.orderRef} has been received!\n\n` +
-      `📦 Order Details:\n` +
+      `ORDER DETAILS:\n` +
       order.items.map(item => `• ${item.cakeName} (${item.weight}) x${item.quantity}`).join('\n') +
-      `\n\n💰 Total: ₹${order.total}\n` +
-      `📅 Delivery: ${new Date(order.deliveryDate).toLocaleDateString('en-IN')}\n` +
-      `⏰ Time: ${order.deliveryTime === 'morning' ? '9 AM - 12 PM' : order.deliveryTime === 'afternoon' ? '12 PM - 4 PM' : '4 PM - 8 PM'}\n\n` +
+      `\n\nTotal: Rs ${order.total}\n` +
+      `Delivery: ${new Date(order.deliveryDate).toLocaleDateString('en-IN')}\n` +
+      `Time: ${order.deliveryTime === 'morning' ? '9 AM - 12 PM' : order.deliveryTime === 'afternoon' ? '12 PM - 4 PM' : '4 PM - 8 PM'}\n\n` +
       `We'll keep you updated on your order status.\n\n` +
-      `Thank you for choosing NestSweet Bakers! 🍰`
-    );
-    return message;
+      `Thank you for choosing NestSweet Bakers!`;
+    return encodeURIComponent(message);
   };
 
   const stats = {
@@ -466,6 +607,73 @@ export default function AdminOrdersPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      {/* WhatsApp Message Modal */}
+      {whatsappModal.show && whatsappModal.order && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-6 animate-scale-up max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
+                  <MessageCircle className="text-green-600" size={24} />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-bold text-gray-800">Send WhatsApp Update</h3>
+                  <p className="text-sm text-gray-600">Order #{whatsappModal.order.orderRef}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setWhatsappModal({ show: false, order: null, newStatus: '', message: '' })}
+                className="p-2 hover:bg-gray-100 rounded-lg transition"
+              >
+                <XCircle size={24} />
+              </button>
+            </div>
+
+            <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-sm text-blue-800">
+                <Info className="inline mr-2" size={16} />
+                Status will be updated to <strong className="uppercase">{whatsappModal.newStatus}</strong> and customer will receive this message on WhatsApp.
+              </p>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
+                Message to {whatsappModal.order.userName}
+              </label>
+              <textarea
+                value={whatsappModal.message}
+                onChange={(e) => setWhatsappModal({ ...whatsappModal, message: e.target.value })}
+                rows={12}
+                className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none font-mono text-sm"
+                placeholder="Edit message before sending..."
+              />
+              <p className="text-xs text-gray-500 mt-2">
+                You can edit this message before sending to the customer
+              </p>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  updateOrderStatus(whatsappModal.order!.id, whatsappModal.newStatus, true);
+                  setWhatsappModal({ show: false, order: null, newStatus: '', message: '' });
+                }}
+                className="flex-1 px-4 py-3 border-2 border-gray-300 text-gray-700 rounded-xl font-semibold hover:bg-gray-50 transition-all"
+              >
+                Skip WhatsApp, Just Update
+              </button>
+              <button
+                onClick={handleSendWhatsApp}
+                className="flex-1 px-4 py-3 bg-green-600 text-white rounded-xl font-semibold hover:bg-green-700 transition-all flex items-center justify-center gap-2"
+              >
+                <Send size={18} />
+                Send & Update Status
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Confirmation Modal */}
       {confirmModal.show && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in">
@@ -518,13 +726,22 @@ export default function AdminOrdersPage() {
           </p>
         </div>
 
-        <button
-          onClick={exportToCSV}
-          className="flex items-center gap-2 bg-green-600 text-white px-6 py-3 rounded-xl hover:bg-green-700 transition-all font-semibold shadow-lg"
-        >
-          <Download size={20} />
-          Export CSV
-        </button>
+        <div className="flex gap-2">
+          <Link
+            href="/admin/notifications"
+            className="flex items-center gap-2 bg-purple-600 text-white px-6 py-3 rounded-xl hover:bg-purple-700 transition-all font-semibold shadow-lg"
+          >
+            <Bell size={20} />
+            Notifications
+          </Link>
+          <button
+            onClick={exportToCSV}
+            className="flex items-center gap-2 bg-green-600 text-white px-6 py-3 rounded-xl hover:bg-green-700 transition-all font-semibold shadow-lg"
+          >
+            <Download size={20} />
+            Export CSV
+          </button>
+        </div>
       </div>
 
       {/* Stats Cards */}
@@ -853,7 +1070,6 @@ export default function AdminOrdersPage() {
                         Customer Details
                       </h4>
                       <div className="space-y-2 text-sm bg-white rounded-lg p-3">
-                        {/* ✅ FIXED: Added optional chaining */}
                         {order.userPhone && (
                           <div className="flex items-start gap-2">
                             <Phone className="text-gray-400 flex-shrink-0 mt-0.5" size={14} />
@@ -1019,7 +1235,10 @@ export default function AdminOrdersPage() {
 
                   {/* Status Update */}
                   <div>
-                    <h4 className="font-bold text-gray-800 mb-3">Update Order Status</h4>
+                    <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
+                      <Zap size={18} className="text-orange-600" />
+                      Update Order Status
+                    </h4>
                     <select
                       value={order.status}
                       onChange={(e) => updateOrderStatus(order.id, e.target.value)}
@@ -1038,9 +1257,13 @@ export default function AdminOrdersPage() {
                         Updating status...
                       </p>
                     )}
+                    <p className="text-xs text-gray-500 mt-2 flex items-center gap-1">
+                      <Bell size={12} />
+                      Customer will receive in-app and WhatsApp notifications
+                    </p>
                   </div>
 
-                  {/* ✅ FIXED: Contact Actions with proper WhatsApp link */}
+                  {/* Contact Actions */}
                   <div className="flex gap-2">
                     {order.userPhone && (
                       <>
@@ -1049,7 +1272,7 @@ export default function AdminOrdersPage() {
                           className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-semibold"
                         >
                           <Phone size={18} />
-                          Call Customer
+                          Call
                         </a>
                         <a
                           href={`https://wa.me/${order.userPhone.replace(/[^0-9]/g, '')}?text=${generateWhatsAppMessage(order)}`}
