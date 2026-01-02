@@ -1464,8 +1464,527 @@ export default function CakeDetailPage() {
             </button>
           </div>
 
-          {/* Details tab content (unchanged from your version) */}
-          {/* ... keep your existing 'details' and 'reviews' tab content as in file:328 ... */}
+                {/* Tabs Section - Responsive */}
+        <div className="bg-white rounded-xl md:rounded-2xl shadow-2xl p-4 md:p-6 lg:p-10 mb-8 md:mb-12 animate-fade-in">
+         
+
+          {/* Tab Content */}
+          {activeTab === 'details' && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 animate-fade-in">
+              <div className="bg-green-50 rounded-xl p-4 md:p-6 border border-green-200">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="p-2 md:p-3 bg-green-100 rounded-lg">
+                    <Cookie className="text-green-600" size={20} />
+                  </div>
+                  <h3 className="font-bold text-base md:text-lg">Ingredients</h3>
+                </div>
+                <ul className="space-y-2 text-xs md:text-sm text-gray-600">
+                  <li className="flex items-center gap-2">
+                    <CheckCircle size={14} className="text-green-600 flex-shrink-0" />
+                    <span>Premium quality flour</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle size={14} className="text-green-600 flex-shrink-0" />
+                    <span>Fresh dairy products</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle size={14} className="text-green-600 flex-shrink-0" />
+                    <span>Natural flavors</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle size={14} className="text-green-600 flex-shrink-0" />
+                    <span>No artificial preservatives</span>
+                  </li>
+                </ul>
+              </div>
+
+              <div className="bg-blue-50 rounded-xl p-4 md:p-6 border border-blue-200">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="p-2 md:p-3 bg-blue-100 rounded-lg">
+                    <Box className="text-blue-600" size={20} />
+                  </div>
+                <h3 className="font-bold text-base md:text-lg">Packaging</h3>
+                </div>
+                <ul className="space-y-2 text-xs md:text-sm text-gray-600">
+                  <li className="flex items-center gap-2">
+                    <CheckCircle size={14} className="text-blue-600 flex-shrink-0" />
+                    <span>Hygienic food-grade boxes</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle size={14} className="text-blue-600 flex-shrink-0" />
+                    <span>Temperature controlled</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle size={14} className="text-blue-600 flex-shrink-0" />
+                    <span>Secure wrapping</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle size={14} className="text-blue-600 flex-shrink-0" />
+                    <span>Gift packaging available</span>
+                  </li>
+                </ul>
+              </div>
+
+              <div className="bg-purple-50 rounded-xl p-4 md:p-6 border border-purple-200">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="p-2 md:p-3 bg-purple-100 rounded-lg">
+                    <Info className="text-purple-600" size={20} />
+                  </div>
+                  <h3 className="font-bold text-base md:text-lg">Storage Tips</h3>
+                </div>
+                <ul className="space-y-2 text-xs md:text-sm text-gray-600">
+                  <li className="flex items-center gap-2">
+                    <CheckCircle size={14} className="text-purple-600 flex-shrink-0" />
+                    <span>Refrigerate immediately</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle size={14} className="text-purple-600 flex-shrink-0" />
+                    <span>Best within 24 hours</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle size={14} className="text-purple-600 flex-shrink-0" />
+                    <span>Keep at 2-8°C</span>
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle size={14} className="text-purple-600 flex-shrink-0" />
+                    <span>Bring to room temperature before serving</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'reviews' && (
+            <div className="animate-fade-in">
+              {/* Rating Summary - Responsive */}
+              {reviews.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8 mb-6 md:mb-8 p-4 md:p-6 bg-gradient-to-r from-pink-50 to-purple-50 rounded-xl border-2 border-pink-200">
+                  <div className="text-center">
+                    <div className="text-5xl md:text-6xl font-bold text-pink-600 mb-2">
+                      {averageRating.toFixed(1)}
+                    </div>
+                    <div className="flex items-center justify-center gap-1 mb-2">
+                      {[...Array(5)].map((_, i) => (
+                        <Star
+                          key={i}
+                          size={20}
+                          className={
+                            i < Math.round(averageRating)
+                              ? 'fill-yellow-400 text-yellow-400'
+                              : 'text-gray-300'
+                          }
+                        />
+                      ))}
+                    </div>
+                    <p className="text-sm md:text-base text-gray-600 font-semibold">
+                      {reviews.length} {reviews.length === 1 ? 'review' : 'reviews'}
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    {[5, 4, 3, 2, 1].map((stars, index) => {
+                      const count = ratingDistribution[index];
+                      const percentage =
+                        reviews.length > 0 ? (count / reviews.length) * 100 : 0;
+
+                      return (
+                        <div key={stars} className="flex items-center gap-2 md:gap-3">
+                          <span className="text-xs md:text-sm font-semibold w-12 md:w-16 flex items-center gap-1">
+                            {stars}{' '}
+                            <Star
+                              size={10}
+                              className="fill-yellow-400 text-yellow-400"
+                            />
+                          </span>
+                          <div className="flex-1 h-2 md:h-3 bg-gray-200 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-yellow-400 to-orange-400 transition-all duration-1000 rounded-full"
+                              style={{ width: `${percentage}%` }}
+                            />
+                          </div>
+                          <span className="text-xs md:text-sm text-gray-600 w-8 md:w-12 text-right font-semibold">
+                            {count}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Write Review Button */}
+              <div className="mb-6 md:mb-8">
+                <button
+                  onClick={() => setShowReviewForm(!showReviewForm)}
+                  className="w-full md:w-auto bg-gradient-to-r from-pink-600 to-purple-600 text-white px-4 md:px-6 py-3 rounded-lg hover:from-pink-700 hover:to-purple-700 transition font-semibold flex items-center justify-center gap-2 shadow-lg text-sm md:text-base"
+                >
+                  <Plus size={18} />
+                  Write a Review
+                </button>
+              </div>
+
+              {/* Review Form */}
+              {showReviewForm && (
+                <form
+                  onSubmit={handleSubmitReview}
+                  className="mb-6 md:mb-8 p-4 md:p-6 bg-gradient-to-r from-pink-50 to-purple-50 rounded-xl border-2 border-pink-200 animate-scale-in"
+                >
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-bold text-lg md:text-xl flex items-center gap-2">
+                      <Sparkles size={18} className="text-pink-600" />
+                      Share Your Experience
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => setShowReviewForm(false)}
+                      className="p-2 hover:bg-pink-100 rounded-lg transition"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-semibold mb-2">
+                        Your Name *
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Enter your name"
+                        required
+                        value={reviewForm.name}
+                        onChange={e =>
+                          setReviewForm({ ...reviewForm, name: e.target.value })
+                        }
+                        className="w-full px-3 md:px-4 py-2 md:py-3 border-2 border-gray-200 rounded-lg focus:border-pink-500 focus:outline-none transition text-sm md:text-base"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold mb-2">
+                        Your Rating *
+                      </label>
+                      <div className="flex gap-2">
+                        {[1, 2, 3, 4, 5].map(star => (
+                          <button
+                            key={star}
+                            type="button"
+                            onClick={() =>
+                              setReviewForm({ ...reviewForm, rating: star })
+                            }
+                            className="transition-transform hover:scale-125"
+                          >
+                            <Star
+                              size={28}
+                              className={
+                                star <= reviewForm.rating
+                                  ? 'fill-yellow-400 text-yellow-400'
+                                  : 'text-gray-300'
+                              }
+                            />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-semibold mb-2">
+                        Your Review *
+                      </label>
+                      <textarea
+                        placeholder="Tell us about your experience..."
+                        required
+                        value={reviewForm.comment}
+                        onChange={e =>
+                          setReviewForm({ ...reviewForm, comment: e.target.value })
+                        }
+                        rows={4}
+                        className="w-full px-3 md:px-4 py-2 md:py-3 border-2 border-gray-200 rounded-lg focus:border-pink-500 focus:outline-none resize-none transition text-sm md:text-base"
+                        minLength={10}
+                      />
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      <button
+                        type="submit"
+                        className="flex-1 bg-gradient-to-r from-pink-600 to-purple-600 text-white px-4 md:px-6 py-3 rounded-lg hover:from-pink-700 hover:to-purple-700 transition font-semibold shadow-lg text-sm md:text-base"
+                      >
+                        Submit Review
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowReviewForm(false)}
+                        className="bg-gray-200 text-gray-700 px-4 md:px-6 py-3 rounded-lg hover:bg-gray-300 transition font-semibold text-sm md:text-base"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                </form>
+              )}
+
+              {/* Reviews List */}
+              {reviews.length > 0 ? (
+                <div className="space-y-4 md:space-y-6">
+                  {reviews.map(review => (
+                    <div
+                      key={review.id}
+                      className="border-b border-gray-200 pb-4 md:pb-6 last:border-0 hover:bg-gray-50 p-3 md:p-4 rounded-lg transition"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="w-10 h-10 md:w-12 md:h-12 bg-gradient-to-r from-pink-600 to-purple-600 rounded-full flex items-center justify-center text-white font-bold text-base md:text-lg flex-shrink-0">
+                          {review.customerName.charAt(0).toUpperCase()}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2">
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <h4 className="font-bold text-sm md:text-base">
+                                  {review.customerName}
+                                </h4>
+                                {review.verified && (
+                                  <span className="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full flex items-center gap-1">
+                                    <CheckCircle size={10} />
+                                    Verified
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1 mt-1">
+                                {[...Array(5)].map((_, i) => (
+                                  <Star
+                                    key={i}
+                                    size={14}
+                                    className={
+                                      i < review.rating
+                                        ? 'fill-yellow-400 text-yellow-400'
+                                        : 'text-gray-300'
+                                    }
+                                  />
+                                ))}
+                              </div>
+                            </div>
+                            <span className="text-xs md:text-sm text-gray-500">
+                              {new Date(review.createdAt).toLocaleDateString()}
+                            </span>
+                          </div>
+                          <p className="text-xs md:text-sm text-gray-700 leading-relaxed break-words">
+                            {review.comment}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 md:py-12 text-gray-500">
+                  <Star className="mx-auto mb-4 text-gray-300" size={40} />
+                  <p className="text-base md:text-lg font-medium mb-2">
+                    No reviews yet
+                  </p>
+                  <p className="text-xs md:text-sm">
+                    Be the first to review this cake!
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'delivery' && (
+            <div className="animate-fade-in space-y-4 md:space-y-6">
+              <div className="p-4 md:p-6 bg-blue-50 rounded-xl border border-blue-200">
+                <h3 className="font-bold text-base md:text-lg mb-4 flex items-center gap-2">
+                  <Truck size={20} className="text-blue-600" />
+                  Delivery Information
+                </h3>
+                <ul className="space-y-3 text-xs md:text-sm text-gray-700">
+                  <li className="flex items-start gap-3">
+                    <Clock size={16} className="text-blue-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-semibold">Same-day delivery available</p>
+                      <p className="text-gray-600">
+                        Order before 3 PM for same-day delivery
+                      </p>
+                    </div>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <DollarSign
+                      size={16}
+                      className="text-green-600 flex-shrink-0 mt-0.5"
+                    />
+                    <div>
+                      <p className="font-semibold">
+                        Free delivery on orders above {currencySymbol}
+                        {freeDeliveryAbove}
+                      </p>
+                      <p className="text-gray-600">
+                        Delivery charges: {currencySymbol}
+                        {deliveryFee} for orders below {currencySymbol}
+                        {freeDeliveryAbove}
+                      </p>
+                    </div>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <ShieldCheck
+                      size={16}
+                      className="text-purple-600 flex-shrink-0 mt-0.5"
+                    />
+                    <div>
+                      <p className="font-semibold">Safe & hygienic packaging</p>
+                      <p className="text-gray-600">
+                        Temperature controlled delivery boxes
+                      </p>
+                    </div>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <MapPin
+                      size={16}
+                      className="text-red-600 flex-shrink-0 mt-0.5"
+                    />
+                    <div>
+                      <p className="font-semibold">Real-time tracking</p>
+                      <p className="text-gray-600">
+                        Track your order from kitchen to doorstep
+                      </p>
+                    </div>
+                  </li>
+                </ul>
+              </div>
+
+              {cake.deliveryPincodes && cake.deliveryPincodes.length > 0 && (
+                <div className="p-4 md:p-6 bg-cyan-50 rounded-xl border border-cyan-200">
+                  <h3 className="font-bold text-base md:text-lg mb-4 flex items-center gap-2">
+                    <MapPin size={20} className="text-cyan-600" />
+                    Delivery Pincodes
+                  </h3>
+                  <div className="flex flex-wrap gap-2">
+                    {cake.deliveryPincodes.map((pincode, idx) => (
+                      <span
+                        key={idx}
+                        className="px-3 py-1.5 bg-cyan-100 text-cyan-800 rounded-lg text-xs md:text-sm font-semibold"
+                      >
+                        {pincode}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="p-4 md:p-6 bg-orange-50 rounded-xl border border-orange-200">
+                <h3 className="font-bold text-base md:text-lg mb-4 flex items-center gap-2">
+                  <Phone size={20} className="text-orange-600" />
+                  Need Help?
+                </h3>
+                <p className="text-xs md:text-sm text-gray-700 mb-3">
+                  Have questions about delivery? Our customer support team is here
+                  to help!
+                </p>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <a
+                    href="tel:+919876543210"
+                    className="flex-1 bg-orange-600 text-white px-4 py-3 rounded-lg hover:bg-orange-700 transition font-semibold text-center text-sm md:text-base"
+                  >
+                    Call Now
+                  </a>
+                  <a
+                    href="https://wa.me/919876543210"
+                    className="flex-1 bg-green-600 text-white px-4 py-3 rounded-lg hover:bg-green-700 transition font-semibold text-center text-sm md:text-base"
+                  >
+                    WhatsApp
+                  </a>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Recommended Products - Responsive */}
+        {recommendedCakes.length > 0 && (
+          <div className="mb-8 md:mb-12 animate-fade-in">
+            <div className="flex items-center justify-between mb-6 md:mb-8">
+              <div className="flex items-center gap-2 md:gap-3">
+                <TrendingUp className="text-pink-600" size={24} />
+                <h2 className="text-xl md:text-2xl lg:text-3xl font-bold">
+                  You May Also Like
+                </h2>
+              </div>
+              <Link
+                href="/cakes"
+                className="text-pink-600 hover:text-pink-700 font-semibold flex items-center gap-1 text-sm md:text-base"
+              >
+                <span className="hidden sm:inline">View All</span>
+                <ChevronRight size={20} />
+              </Link>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6">
+              {recommendedCakes.map((recCake, index) => {
+                const recDiscount = recCake.discount || 0;
+                const recOriginalPrice = recCake.basePrice || 0;
+                const recDiscountedPrice =
+                  recDiscount > 0
+                    ? recOriginalPrice * (1 - recDiscount / 100)
+                    : recOriginalPrice;
+                const recCurrency = recCake.currency === 'CAD' ? '$' : '₹';
+
+                return (
+                  <Link
+                    key={recCake.id}
+                    href={`/cakes/${recCake.id}`}
+                    className="group animate-fade-in"
+                    style={{ animationDelay: `${index * 100}ms` }}
+                  >
+                    <div className="bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-2">
+                      <div className="relative h-32 sm:h-40 md:h-48 overflow-hidden bg-gray-100">
+                        {recDiscount > 0 && (
+                          <span className="absolute top-2 left-2 bg-red-600 text-white px-2 py-0.5 md:py-1 rounded-full text-xs font-bold z-10">
+                            {recDiscount}% OFF
+                          </span>
+                        )}
+                        {recCake.featured && (
+                          <span className="absolute top-2 right-2 bg-yellow-400 text-gray-900 px-2 py-0.5 md:py-1 rounded-full text-xs font-bold z-10">
+                            ⭐
+                          </span>
+                        )}
+                        <Image
+                          src={
+                            recCake.imageUrl ||
+                            'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=400'
+                          }
+                          alt={recCake.name}
+                          fill
+                          className="object-cover group-hover:scale-110 transition-transform duration-500"
+                          sizes="(max-width: 640px) 50vw, (max-width: 1024px) 50vw, 25vw"
+                        />
+                      </div>
+                      <div className="p-3 md:p-4">
+                        <h3 className="font-bold text-sm md:text-base mb-2 group-hover:text-pink-600 transition-colors line-clamp-1">
+                          {recCake.name}
+                        </h3>
+                        {recDiscount > 0 ? (
+                          <div className="flex items-center gap-2">
+                            <span className="text-pink-600 font-bold text-base md:text-lg">
+                              {recCurrency}
+                              {recDiscountedPrice.toFixed(2)}
+                            </span>
+                            <span className="text-gray-400 line-through text-xs md:text-sm">
+                              {recCurrency}
+                              {recOriginalPrice}
+                            </span>
+                          </div>
+                        ) : (
+                          <p className="text-pink-600 font-bold text-base md:text-lg">
+                            {recCurrency}
+                            {recOriginalPrice}/kg
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
 
           {/* Delivery tab */}
           {activeTab === 'delivery' && (
