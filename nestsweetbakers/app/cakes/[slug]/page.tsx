@@ -1788,205 +1788,7 @@ export default function CakeDetailPage() {
             </div>
           )}
 
-          {activeTab === 'delivery' && (
-            <div className="animate-fade-in space-y-4 md:space-y-6">
-              <div className="p-4 md:p-6 bg-blue-50 rounded-xl border border-blue-200">
-                <h3 className="font-bold text-base md:text-lg mb-4 flex items-center gap-2">
-                  <Truck size={20} className="text-blue-600" />
-                  Delivery Information
-                </h3>
-                <ul className="space-y-3 text-xs md:text-sm text-gray-700">
-                  <li className="flex items-start gap-3">
-                    <Clock size={16} className="text-blue-600 flex-shrink-0 mt-0.5" />
-                    <div>
-                      <p className="font-semibold">Same-day delivery available</p>
-                      <p className="text-gray-600">
-                        Order before 3 PM for same-day delivery
-                      </p>
-                    </div>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <DollarSign
-                      size={16}
-                      className="text-green-600 flex-shrink-0 mt-0.5"
-                    />
-                    <div>
-                      <p className="font-semibold">
-                        Free delivery on orders above {currencySymbol}
-                        {freeDeliveryAbove}
-                      </p>
-                      <p className="text-gray-600">
-                        Delivery charges: {currencySymbol}
-                        {deliveryFee} for orders below {currencySymbol}
-                        {freeDeliveryAbove}
-                      </p>
-                    </div>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <ShieldCheck
-                      size={16}
-                      className="text-purple-600 flex-shrink-0 mt-0.5"
-                    />
-                    <div>
-                      <p className="font-semibold">Safe & hygienic packaging</p>
-                      <p className="text-gray-600">
-                        Temperature controlled delivery boxes
-                      </p>
-                    </div>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <MapPin
-                      size={16}
-                      className="text-red-600 flex-shrink-0 mt-0.5"
-                    />
-                    <div>
-                      <p className="font-semibold">Real-time tracking</p>
-                      <p className="text-gray-600">
-                        Track your order from kitchen to doorstep
-                      </p>
-                    </div>
-                  </li>
-                </ul>
-              </div>
-
-              {cake.deliveryPincodes && cake.deliveryPincodes.length > 0 && (
-                <div className="p-4 md:p-6 bg-cyan-50 rounded-xl border border-cyan-200">
-                  <h3 className="font-bold text-base md:text-lg mb-4 flex items-center gap-2">
-                    <MapPin size={20} className="text-cyan-600" />
-                    Delivery Pincodes
-                  </h3>
-                  <div className="flex flex-wrap gap-2">
-                    {cake.deliveryPincodes.map((pincode, idx) => (
-                      <span
-                        key={idx}
-                        className="px-3 py-1.5 bg-cyan-100 text-cyan-800 rounded-lg text-xs md:text-sm font-semibold"
-                      >
-                        {pincode}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="p-4 md:p-6 bg-orange-50 rounded-xl border border-orange-200">
-                <h3 className="font-bold text-base md:text-lg mb-4 flex items-center gap-2">
-                  <Phone size={20} className="text-orange-600" />
-                  Need Help?
-                </h3>
-                <p className="text-xs md:text-sm text-gray-700 mb-3">
-                  Have questions about delivery? Our customer support team is here
-                  to help!
-                </p>
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <a
-                    href="tel:+919876543210"
-                    className="flex-1 bg-orange-600 text-white px-4 py-3 rounded-lg hover:bg-orange-700 transition font-semibold text-center text-sm md:text-base"
-                  >
-                    Call Now
-                  </a>
-                  <a
-                    href="https://wa.me/919876543210"
-                    className="flex-1 bg-green-600 text-white px-4 py-3 rounded-lg hover:bg-green-700 transition font-semibold text-center text-sm md:text-base"
-                  >
-                    WhatsApp
-                  </a>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Recommended Products - Responsive */}
-        {recommendedCakes.length > 0 && (
-          <div className="mb-8 md:mb-12 animate-fade-in">
-            <div className="flex items-center justify-between mb-6 md:mb-8">
-              <div className="flex items-center gap-2 md:gap-3">
-                <TrendingUp className="text-pink-600" size={24} />
-                <h2 className="text-xl md:text-2xl lg:text-3xl font-bold">
-                  You May Also Like
-                </h2>
-              </div>
-              <Link
-                href="/cakes"
-                className="text-pink-600 hover:text-pink-700 font-semibold flex items-center gap-1 text-sm md:text-base"
-              >
-                <span className="hidden sm:inline">View All</span>
-                <ChevronRight size={20} />
-              </Link>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6">
-              {recommendedCakes.map((recCake, index) => {
-                const recDiscount = recCake.discount || 0;
-                const recOriginalPrice = recCake.basePrice || 0;
-                const recDiscountedPrice =
-                  recDiscount > 0
-                    ? recOriginalPrice * (1 - recDiscount / 100)
-                    : recOriginalPrice;
-                const recCurrency = recCake.currency === 'CAD' ? '$' : '₹';
-
-                return (
-                  <Link
-                    key={recCake.id}
-                    href={`/cakes/${recCake.id}`}
-                    className="group animate-fade-in"
-                    style={{ animationDelay: `${index * 100}ms` }}
-                  >
-                    <div className="bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-2">
-                      <div className="relative h-32 sm:h-40 md:h-48 overflow-hidden bg-gray-100">
-                        {recDiscount > 0 && (
-                          <span className="absolute top-2 left-2 bg-red-600 text-white px-2 py-0.5 md:py-1 rounded-full text-xs font-bold z-10">
-                            {recDiscount}% OFF
-                          </span>
-                        )}
-                        {recCake.featured && (
-                          <span className="absolute top-2 right-2 bg-yellow-400 text-gray-900 px-2 py-0.5 md:py-1 rounded-full text-xs font-bold z-10">
-                            ⭐
-                          </span>
-                        )}
-                        <Image
-                          src={
-                            recCake.imageUrl ||
-                            'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=400'
-                          }
-                          alt={recCake.name}
-                          fill
-                          className="object-cover group-hover:scale-110 transition-transform duration-500"
-                          sizes="(max-width: 640px) 50vw, (max-width: 1024px) 50vw, 25vw"
-                        />
-                      </div>
-                      <div className="p-3 md:p-4">
-                        <h3 className="font-bold text-sm md:text-base mb-2 group-hover:text-pink-600 transition-colors line-clamp-1">
-                          {recCake.name}
-                        </h3>
-                        {recDiscount > 0 ? (
-                          <div className="flex items-center gap-2">
-                            <span className="text-pink-600 font-bold text-base md:text-lg">
-                              {recCurrency}
-                              {recDiscountedPrice.toFixed(2)}
-                            </span>
-                            <span className="text-gray-400 line-through text-xs md:text-sm">
-                              {recCurrency}
-                              {recOriginalPrice}
-                            </span>
-                          </div>
-                        ) : (
-                          <p className="text-pink-600 font-bold text-base md:text-lg">
-                            {recCurrency}
-                            {recOriginalPrice}/kg
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-
-          {/* Delivery tab */}
+           {/* Delivery tab */}
           {activeTab === 'delivery' && (
             <div className="animate-fade-in space-y-4 md:space-y-6">
               <div className="p-4 md:p-6 bg-blue-50 rounded-xl border border-blue-200">
@@ -2110,6 +1912,99 @@ export default function CakeDetailPage() {
               </div>
             </div>
           )}
+          </div>
+
+        {/* Recommended Products - Responsive */}
+        {recommendedCakes.length > 0 && (
+          <div className="mb-8 md:mb-12 animate-fade-in">
+            <div className="flex items-center justify-between mb-6 md:mb-8">
+              <div className="flex items-center gap-2 md:gap-3">
+                <TrendingUp className="text-pink-600" size={24} />
+                <h2 className="text-xl md:text-2xl lg:text-3xl font-bold">
+                  You May Also Like
+                </h2>
+              </div>
+              <Link
+                href="/cakes"
+                className="text-pink-600 hover:text-pink-700 font-semibold flex items-center gap-1 text-sm md:text-base"
+              >
+                <span className="hidden sm:inline">View All</span>
+                <ChevronRight size={20} />
+              </Link>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6">
+              {recommendedCakes.map((recCake, index) => {
+                const recDiscount = recCake.discount || 0;
+                const recOriginalPrice = recCake.basePrice || 0;
+                const recDiscountedPrice =
+                  recDiscount > 0
+                    ? recOriginalPrice * (1 - recDiscount / 100)
+                    : recOriginalPrice;
+                const recCurrency = recCake.currency === 'CAD' ? '$' : '₹';
+
+                return (
+                  <Link
+                    key={recCake.id}
+                    href={`/cakes/${recCake.id}`}
+                    className="group animate-fade-in"
+                    style={{ animationDelay: `${index * 100}ms` }}
+                  >
+                    <div className="bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-2">
+                      <div className="relative h-32 sm:h-40 md:h-48 overflow-hidden bg-gray-100">
+                        {recDiscount > 0 && (
+                          <span className="absolute top-2 left-2 bg-red-600 text-white px-2 py-0.5 md:py-1 rounded-full text-xs font-bold z-10">
+                            {recDiscount}% OFF
+                          </span>
+                        )}
+                        {recCake.featured && (
+                          <span className="absolute top-2 right-2 bg-yellow-400 text-gray-900 px-2 py-0.5 md:py-1 rounded-full text-xs font-bold z-10">
+                            ⭐
+                          </span>
+                        )}
+                        <Image
+                          src={
+                            recCake.imageUrl ||
+                            'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=400'
+                          }
+                          alt={recCake.name}
+                          fill
+                          className="object-cover group-hover:scale-110 transition-transform duration-500"
+                          sizes="(max-width: 640px) 50vw, (max-width: 1024px) 50vw, 25vw"
+                        />
+                      </div>
+                      <div className="p-3 md:p-4">
+                        <h3 className="font-bold text-sm md:text-base mb-2 group-hover:text-pink-600 transition-colors line-clamp-1">
+                          {recCake.name}
+                        </h3>
+                        {recDiscount > 0 ? (
+                          <div className="flex items-center gap-2">
+                            <span className="text-pink-600 font-bold text-base md:text-lg">
+                              {recCurrency}
+                              {recDiscountedPrice.toFixed(2)}
+                            </span>
+                            <span className="text-gray-400 line-through text-xs md:text-sm">
+                              {recCurrency}
+                              {recOriginalPrice}
+                            </span>
+                          </div>
+                        ) : (
+                          <p className="text-pink-600 font-bold text-base md:text-lg">
+                            {recCurrency}
+                            {recOriginalPrice}/kg
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+
+         
 
           {/* Keep your existing 'details' and 'reviews' tab JSX from file:328 above this point */}
         </div>
